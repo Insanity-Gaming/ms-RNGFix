@@ -1,0 +1,16 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RngFix", "RngFix\RngFix.csproj", "{2413BED1-ECBE-4C39-8ED0-9F6C5454DE11}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{2413BED1-ECBE-4C39-8ED0-9F6C5454DE11}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2413BED1-ECBE-4C39-8ED0-9F6C5454DE11}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2413BED1-ECBE-4C39-8ED0-9F6C5454DE11}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2413BED1-ECBE-4C39-8ED0-9F6C5454DE11}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

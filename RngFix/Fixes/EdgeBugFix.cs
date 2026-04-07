@@ -1,0 +1,188 @@
+using InsanityGaming.RngFix.Config;
+using InsanityGaming.RngFix.Models;
+using Microsoft.Extensions.Logging;
+using Sharp.Shared.Enums;
+using Sharp.Shared.Managers;
+using Sharp.Shared.Types;
+
+namespace InsanityGaming.RngFix.Fixes;
+
+/// <summary>
+/// Pre-tick fix: Prevents edge bugs by detecting when the player will narrowly miss landing
+/// at the end of the tick and rewinding their origin to guarantee the landing.
+///
+/// An edge bug occurs when the player grazes a surface mid-tick, gets deflected upward
+/// (Z velocity capped), and ends the tick in the air just above ground they should have landed on.
+/// </summary>
+public sealed class EdgeBugFix
+{
+    private readonly RngFixConVars _conVars;
+    private readonly IPhysicsQueryManager _physicsQuery;
+    private readonly ILogger<EdgeBugFix> _logger;
+
+    // CS2 MASK_PLAYERSOLID equivalent
+    private static readonly InteractionLayers PlayerSolidLayers =
+        InteractionLayers.Solid      | InteractionLayers.Sky        | InteractionLayers.PlayerClip |
+        InteractionLayers.WorldGeometry | InteractionLayers.Slime   | InteractionLayers.Player    |
+        InteractionLayers.PhysicsProp;
+
+    public EdgeBugFix(RngFixConVars conVars, IPhysicsQueryManager physicsQuery, ILogger<EdgeBugFix> logger)
+    {
+        _conVars      = conVars;
+        _physicsQuery = physicsQuery;
+        _logger       = logger;
+    }
+
+    /// <summary>
+    /// Evaluates whether the predicted collision at <paramref name="collisionPoint"/> will result
+    /// in an edge bug, and if so, rewrites <paramref name="moveOrigin"/> in CMoveData to prevent it.
+    /// </summary>
+    /// <param name="state">Current player state (pre-tick).</param>
+    /// <param name="velocity">Pre-collision velocity (with gravity and jump applied).</param>
+    /// <param name="origin">Player origin at tick start.</param>
+    /// <param name="collisionPoint">Predicted first collision point.</param>
+    /// <param name="collisionNormal">Surface normal at collision point.</param>
+    /// <param name="mins">Player hull mins (accounting for duck state).</param>
+    /// <param name="maxs">Player hull maxs (accounting for duck state).</param>
+    /// <param name="moveOrigin">Reference to CMoveData origin — set this to rewind the player.</param>
+    /// <returns>True if the fix was applied.</returns>
+    public unsafe bool TryPrevent(
+        ModulePlayerState state,
+        in Vector velocity,
+        in Vector origin,
+        in Vector collisionPoint,
+        in Vector collisionNormal,
+        in Vector mins,
+        in Vector maxs,
+        ref Vector moveOrigin)
+    {
+        if (!_conVars.IsEdgeEnabled) return false;
+
+        // Estimate where the player will end up at tick end after the collision.
+        float fractionLeft = 1f - Trace(origin, collisionPoint, state, velocity, mins, maxs).Fraction;
+
+        Vector tickEnd;
+
+        if (collisionNormal.Z == 1f)
+        {
+            // Level ground: all that changes after collision is Z velocity becomes zero.
+            var velocityTick = new Vector(velocity.X * state.FrameTime, velocity.Y * state.FrameTime, velocity.Z * state.FrameTime);
+            tickEnd = new Vector(
+                collisionPoint.X + velocity.X * state.FrameTime * fractionLeft,
+                collisionPoint.Y + velocity.Y * state.FrameTime * fractionLeft,
+                collisionPoint.Z);
+        }
+        else
+        {
+            // Inclined surface: deflect velocity and project the rest of the tick.
+            var deflected = new Vector(
+                velocity.X - collisionNormal.X * (velocity.X * collisionNormal.X + velocity.Y * collisionNormal.Y + velocity.Z * collisionNormal.Z),
+                velocity.Y - collisionNormal.Y * (velocity.X * collisionNormal.X + velocity.Y * collisionNormal.Y + velocity.Z * collisionNormal.Z),
+                velocity.Z - collisionNormal.Z * (velocity.X * collisionNormal.X + velocity.Y * collisionNormal.Y + velocity.Z * collisionNormal.Z));
+
+            if (deflected.Z > PhysicsConstants.NonJumpVelocity)
+            {
+                // Would be an edge bug 100% of the time — always airborne at tick end.
+                return false;
+            }
+
+            tickEnd = new Vector(
+                collisionPoint.X + deflected.X * state.FrameTime * fractionLeft,
+                collisionPoint.Y + deflected.Y * state.FrameTime * fractionLeft,
+                collisionPoint.Z + deflected.Z * state.FrameTime * fractionLeft);
+        }
+
+        // Check if there is something to land on within LAND_HEIGHT below the estimated tick end.
+        var tickEndBelow = new Vector(tickEnd.X, tickEnd.Y, tickEnd.Z - PhysicsConstants.LandHeight);
+        var groundTrace  = _physicsQuery.TraceShapeNoPlayers(
+            new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
+            tickEnd, tickEndBelow,
+            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+
+        if (groundTrace.DidHit())
+        {
+            // There's ground nearby — check if it's actually landable.
+            var nrm2 = groundTrace.PlaneNormal;
+            if (nrm2.Z >= PhysicsConstants.MinStandableZNrm) return false;           // Landable — no edge bug.
+            if (TracePlayerBBoxForGround(tickEnd, tickEndBelow, mins, maxs)) return false; // Quadrant check also finds ground.
+        }
+
+        // The player will not land. Rewind origin to prevent the collision.
+        _logger.LogDebug("EdgeBugFix applied at {CollisionPoint}", collisionPoint);
+        PreventCollision(state, origin, collisionPoint, velocity, ref moveOrigin);
+        return true;
+    }
+
+    // ──────────────────────────────── Private helpers ────────────────────────────────
+
+    /// <summary>
+    /// Rewrites CMoveData origin so the player ends the tick just above the collision surface
+    /// rather than passing through it. Effectively simulates a partial-tick jump.
+    /// </summary>
+    private static void PreventCollision(
+        ModulePlayerState state,
+        in Vector origin,
+        in Vector collisionPoint,
+        in Vector velocity,
+        ref Vector moveOrigin)
+    {
+        var velocityTick = new Vector(
+            velocity.X * state.FrameTime,
+            velocity.Y * state.FrameTime,
+            velocity.Z * state.FrameTime);
+
+        // Rewind: place the player before where the collision would happen.
+        var newOrigin = new Vector(
+            collisionPoint.X - velocityTick.X,
+            collisionPoint.Y - velocityTick.Y,
+            collisionPoint.Z - velocityTick.Z + 0.1f); // small clearance to avoid floating-point collision
+
+        moveOrigin = newOrigin;
+        state.LastCollisionTick = 0; // No longer colliding this tick — clear prediction flag.
+    }
+
+    /// <summary>
+    /// Checks four hull quadrants below the player to find walkable ground on steep surfaces.
+    /// Mirrors CGameMovement::TracePlayerBBoxForGround.
+    /// </summary>
+    private bool TracePlayerBBoxForGround(in Vector origin, in Vector originBelow, in Vector mins, in Vector maxs)
+    {
+        // -x -y quadrant
+        var q1Maxs = new Vector(maxs.X > 0f ? 0f : maxs.X, maxs.Y > 0f ? 0f : maxs.Y, maxs.Z);
+        if (HullGroundHit(origin, originBelow, mins, q1Maxs)) return true;
+
+        // +x +y quadrant
+        var q2Mins = new Vector(mins.X < 0f ? 0f : mins.X, mins.Y < 0f ? 0f : mins.Y, mins.Z);
+        if (HullGroundHit(origin, originBelow, q2Mins, maxs)) return true;
+
+        // -x +y quadrant
+        var q3Mins = new Vector(mins.X, mins.Y < 0f ? 0f : mins.Y, mins.Z);
+        var q3Maxs = new Vector(maxs.X > 0f ? 0f : maxs.X, maxs.Y, maxs.Z);
+        if (HullGroundHit(origin, originBelow, q3Mins, q3Maxs)) return true;
+
+        // +x -y quadrant
+        var q4Mins = new Vector(mins.X < 0f ? 0f : mins.X, mins.Y, mins.Z);
+        var q4Maxs = new Vector(maxs.X, maxs.Y > 0f ? 0f : maxs.Y, maxs.Z);
+        if (HullGroundHit(origin, originBelow, q4Mins, q4Maxs)) return true;
+
+        return false;
+    }
+
+    private bool HullGroundHit(in Vector from, in Vector to, in Vector mins, in Vector maxs)
+    {
+        var trace = _physicsQuery.TraceShapeNoPlayers(
+            new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
+            from, to,
+            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+
+        return trace.DidHit() && trace.PlaneNormal.Z >= PhysicsConstants.MinStandableZNrm;
+    }
+
+    private TraceResult Trace(in Vector from, in Vector to, ModulePlayerState state, in Vector velocity, in Vector mins, in Vector maxs)
+    {
+        return _physicsQuery.TraceShapeNoPlayers(
+            new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
+            from, to,
+            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+    }
+}
