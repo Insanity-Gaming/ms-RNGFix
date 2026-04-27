@@ -1,0 +1,51 @@
+name: Build Plugin
+
+on:
+  push:
+    branches:
+      - master
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: "!contains(github.event.head_commit.message, '[no ci]')"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Create release folders
+        run: mkdir -p game/sharp/modules
+
+      - name: Build
+        run: |
+          dotnet build -c Release --no-restore \
+            -p:Version=1.0.${{ github.run_number }} \
+            -p:AssemblyVersion=1.0.${{ github.run_number }} \
+            -p:FileVersion=1.0.${{ github.run_number }}
+
+      - name: Zip module
+        run: |
+          cd src
+          zip -r module.zip game
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          prerelease: ${{ github.ref_name == 'dev' }}
+          files: src/module.zip
