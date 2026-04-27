@@ -6,6 +6,7 @@
         <Nullable>enable</Nullable>
         <AssemblyName>RngFix</AssemblyName>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <RootNamespace>InsanityGaming.RngFix</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
