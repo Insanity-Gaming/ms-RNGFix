@@ -101,9 +101,10 @@ public sealed class StairsFix
             unique: true,
             entityBuffer);
 
-        for (int i = 0; i < count; i++)
+        int entityCount = Math.Min(count, entityBuffer.Length);
+        for (int i = 0; i < entityCount; i++)
         {
-            var entity = TryGetEntity((int)entityBuffer[i]);
+            var entity = TryGetEntity(entityBuffer[i]);
             if (entity is null) continue;
 
             var classname = entity.Classname;
@@ -159,10 +160,12 @@ public sealed class StairsFix
     /// <summary>
     /// Safe entity lookup that prevents BaseEntity.Create crashes.
     /// </summary>
-    private IBaseEntity? TryGetEntity(int index)
+    private IBaseEntity? TryGetEntity(uint rawIndex)
     {
-        if (index <= 0 || index > 16384)
+        if (rawIndex == 0 || rawIndex > 16384)
             return null;
+
+        int index = (int)rawIndex;
 
         try
         {
