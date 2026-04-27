@@ -33,19 +33,19 @@ public static class PhysicsConstants
     public const ulong IN_DUCK = 4UL;
 
     // NetVar string keys (cached as constants to avoid string allocation in hot path)
-    public const string NetVarBaseVelocity = "m_vecBaseVelocity";
+    // public const string NetVarBaseVelocity = "m_vecBaseVelocity";
     // public const string NetVarLaggedMovementValue = "m_flLaggedMovementValue";
     // public const string NetVarGroundEntity = "m_hGroundEntity";
     // public const string NetVarDucking = "m_bDucking";
     // public const string NetVarFlags = "m_fFlags";
     // public const string NetVarMoveType = "m_MoveType";
     // public const string NetVarGravity = "m_flGravity";
-    // public const string NetVarWaterLevel = "m_nWaterLevel";
+    public const string NetVarWaterLevel = "m_flWaterLevel";
     // public const string NetVarLastDuckTime = "m_flLastDuckTime";
     // public const string NetVarDuckSpeed = "m_flDuckSpeed";
     // public const string NetVarStepSize = "m_flStepSize";
-    // public const string NetVarAbsVelocity = "m_vecAbsVelocity";
-    public const string NetVarVelocity = "m_vecVelocity";
+    // public const string NetVarAbsVelocity = "m_vecAbsVelocity"; // (Get/Set)AbsVelocity
+    // public const string NetVarVelocity = "m_vecVelocity"; // (Get/Set)LocalVelocity
     // public const string NetVarMoveParent = "m_hMoveParent";
     // public const string NetVarAbsOrigin  = "m_vecAbsOrigin";
     // public const string NetVarMins       = "m_vecMins";

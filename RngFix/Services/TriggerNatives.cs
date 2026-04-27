@@ -29,10 +29,19 @@ public sealed unsafe class TriggerNatives
         if (!trigger.IsValid() || !other.IsValid())
             return false;
 
-        var vtable = *(nint**)trigger.GetAbsPtr();
-        var fn     = (delegate* unmanaged[Cdecl]<nint, nint, bool>)vtable[_passesTriggerFiltersIndex];
+        var triggerPtr = trigger.GetAbsPtr();
+        var otherPtr   = other.GetAbsPtr();
 
-        return fn(trigger.GetAbsPtr(), other.GetAbsPtr());
+        if (triggerPtr == nint.Zero || otherPtr == nint.Zero || _passesTriggerFiltersIndex < 0)
+            return false;
+
+        var vtable = *(nint**)triggerPtr;
+        if (vtable == null)
+            return false;
+
+        var fn = (delegate* unmanaged<nint, nint, bool>)vtable[_passesTriggerFiltersIndex];
+
+        return fn(triggerPtr, otherPtr);
     }
     
     /// <summary>

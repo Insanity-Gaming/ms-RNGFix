@@ -85,14 +85,8 @@ public sealed class PostThinkHandler : IRngModule
 
         // ── Detect landing ──
         // Compare current ground entity to what it was before the tick (saved pre-tick).
-        int currentGroundEnt = pawn.GroundEntity?.Index ?? -1;
-        bool landed = currentGroundEnt != -1 && state.PreTickGroundEnt == -1;
+        bool landed = state.LastLandTick == state.Tick;
 
-        if (landed)
-        {
-            // Record the tick we landed so TelehopFix can key off it.
-            state.LastLandTick = state.Tick;
-        }
 
         // ── Gather landing surface info (needed by TriggerJumpFix and InclineFix) ──
         bool needLandingInfo = landed &&
@@ -103,6 +97,7 @@ public sealed class PostThinkHandler : IRngModule
         Vector landingPoint   = default;
         Vector landingMins    = default;
         Vector landingMaxs    = default;
+        float landingFraction = 0f;
         bool    landingInfoOk  = false;
 
         if (needLandingInfo)
@@ -128,6 +123,7 @@ public sealed class PostThinkHandler : IRngModule
             {
                 landingNormal = groundTrace.PlaneNormal;
                 landingPoint  = groundTrace.EndPosition;
+                landingFraction = groundTrace.Fraction;
 
                 // If the primary trace hit a non-walkable face, fall back to quadrant traces
                 // (mirrors CGameMovement::TracePlayerBBoxForGround).
@@ -135,7 +131,7 @@ public sealed class PostThinkHandler : IRngModule
                 {
                     bool found = TryQuadrantGroundTrace(
                         origin, originBelow, landingMins, landingMaxs,
-                        out landingNormal, out landingPoint, out landingMins, out landingMaxs);
+                        out landingNormal, out landingPoint, out landingMins, out landingMaxs, out landingFraction);
 
                     if (!found)
                     {
@@ -143,7 +139,7 @@ public sealed class PostThinkHandler : IRngModule
                     }
                 }
 
-                if (landed && groundTrace.Fraction > 0f)
+                if (landed && landingFraction > 0f)
                 {
                     landingInfoOk = true;
                 }
@@ -182,6 +178,7 @@ public sealed class PostThinkHandler : IRngModule
         {
             _inclineFix.TryApplyPostTick(state, pawn, landingNormal);
         }
+        
 
         // ── Telehop fix ──
         _telehopFix.TryApply(pawn, state, _physicsQuery);
@@ -189,8 +186,7 @@ public sealed class PostThinkHandler : IRngModule
 
     // ──────────────────────────────── Private helpers ────────────────────────────────
 
-    private bool IsInWater(IPlayerPawn pawn)
-        => pawn.Flags.HasFlag(EntityFlags.WaterJump);
+    private bool IsInWater(IPlayerPawn pawn) => pawn.GetNetVar<float>(PhysicsConstants.NetVarWaterLevel) > 1f;
 
     /// <summary>
     /// Tries the four hull quadrants (mirrors CGameMovement::TracePlayerBBoxForGround) to
@@ -206,12 +202,13 @@ public sealed class PostThinkHandler : IRngModule
         out Vector normal,
         out Vector point,
         out Vector usedMins,
-        out Vector usedMaxs)
+        out Vector usedMaxs,
+        out float fraction)
     {
         // -x -y
         var q1Mins = origMins;
         var q1Maxs = new Vector(origMaxs.X > 0f ? 0f : origMaxs.X, origMaxs.Y > 0f ? 0f : origMaxs.Y, origMaxs.Z);
-        if (QuadrantHit(origin, originBelow, q1Mins, q1Maxs, out normal, out point))
+        if (QuadrantHit(origin, originBelow, q1Mins, q1Maxs, out normal, out point, out fraction))
         {
             usedMins = q1Mins; usedMaxs = q1Maxs; return true;
         }
@@ -219,7 +216,7 @@ public sealed class PostThinkHandler : IRngModule
         // +x +y
         var q2Mins = new Vector(origMins.X < 0f ? 0f : origMins.X, origMins.Y < 0f ? 0f : origMins.Y, origMins.Z);
         var q2Maxs = origMaxs;
-        if (QuadrantHit(origin, originBelow, q2Mins, q2Maxs, out normal, out point))
+        if (QuadrantHit(origin, originBelow, q2Mins, q2Maxs, out normal, out point, out fraction))
         {
             usedMins = q2Mins; usedMaxs = q2Maxs; return true;
         }
@@ -227,7 +224,7 @@ public sealed class PostThinkHandler : IRngModule
         // -x +y
         var q3Mins = new Vector(origMins.X, origMins.Y < 0f ? 0f : origMins.Y, origMins.Z);
         var q3Maxs = new Vector(origMaxs.X > 0f ? 0f : origMaxs.X, origMaxs.Y, origMaxs.Z);
-        if (QuadrantHit(origin, originBelow, q3Mins, q3Maxs, out normal, out point))
+        if (QuadrantHit(origin, originBelow, q3Mins, q3Maxs, out normal, out point, out fraction))
         {
             usedMins = q3Mins; usedMaxs = q3Maxs; return true;
         }
@@ -235,19 +232,19 @@ public sealed class PostThinkHandler : IRngModule
         // +x -y
         var q4Mins = new Vector(origMins.X < 0f ? 0f : origMins.X, origMins.Y, origMins.Z);
         var q4Maxs = new Vector(origMaxs.X, origMaxs.Y > 0f ? 0f : origMaxs.Y, origMaxs.Z);
-        if (QuadrantHit(origin, originBelow, q4Mins, q4Maxs, out normal, out point))
+        if (QuadrantHit(origin, originBelow, q4Mins, q4Maxs, out normal, out point, out fraction))
         {
             usedMins = q4Mins; usedMaxs = q4Maxs; return true;
         }
 
-        normal = default; point = default; usedMins = origMins; usedMaxs = origMaxs;
+        normal = default; point = default; usedMins = origMins; usedMaxs = origMaxs; fraction = 0f;
         return false;
     }
 
     private bool QuadrantHit(
         in Vector from, in Vector to,
         in Vector mins, in Vector maxs,
-        out Vector normal, out Vector point)
+        out Vector normal, out Vector point, out float fraction)
     {
         var trace = _physicsQuery.TraceShapeNoPlayers(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
@@ -258,10 +255,11 @@ public sealed class PostThinkHandler : IRngModule
         {
             normal = trace.PlaneNormal;
             point  = trace.EndPosition;
+            fraction = trace.Fraction;
             return true;
         }
 
-        normal = default; point = default;
+        normal = default; point = default; fraction = 0f;
         return false;
     }
 }

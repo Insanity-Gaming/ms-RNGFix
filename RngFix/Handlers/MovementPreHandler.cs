@@ -57,6 +57,7 @@ public sealed class MovementPreHandler : IRngModule
     public bool Init()
     {
         _sharedSystem.GetHookManager().PlayerProcessMovePre.InstallForward(OnProcessMovementPre);
+        _sharedSystem.GetHookManager().PlayerProcessMovePost.InstallForward(OnProcessMovementPost);
         return true;
     }
 
@@ -77,11 +78,26 @@ public sealed class MovementPreHandler : IRngModule
         state.Tick++;
         state.FrameTime = GetTickInterval() * 1.0f;
         state.MapTeleportedSequentialTicks = false;
+        state.WasInAirPreTick = obj.Info->InAir;
 
         // Fast-path: skip all prediction if no pre-tick fix is active.
         if (!_conVars.AnyPreTickFixEnabled) return;
 
         RunPreTickChecks(pawn, state, obj);
+    }
+
+    public unsafe void OnProcessMovementPost(IPlayerProcessMoveForwardParams obj)
+    {
+        var pawn = obj.Pawn;
+        if (pawn is null || !pawn.IsAlive)
+            return;
+
+        var state = _playerState.Get(pawn.Index);
+        if (state is null)
+            return;
+
+        if (state.WasInAirPreTick && !obj.Info->InAir)
+            state.LastLandTick = state.Tick;
     }
 
     // ──────────────────────────────── Private ────────────────────────────────
@@ -116,7 +132,7 @@ public sealed class MovementPreHandler : IRngModule
         var nextOrigin = origin;
 
         // Read base velocity directly from the entity (not in CMoveData).
-        var baseVelocity = pawn.GetAbsVelocity();
+        var baseVelocity = pawn.BaseVelocity;
 
         // ── Replicate CGameMovement::ProcessMovement math ──
 

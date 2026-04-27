@@ -136,7 +136,7 @@ public sealed class InclineFix
             EntityFlags flags = pawn.Flags;
             if (flags.HasFlag(EntityFlags.BaseVelocity))
             {
-                var baseVel = pawn.GetAbsVelocity();
+                var baseVel = pawn.BaseVelocity;
                 newVelocity = new Vector(
                     newVelocity.X + baseVel.X,
                     newVelocity.Y + baseVel.Y,
@@ -194,23 +194,24 @@ public sealed class InclineFix
             desiredVelocity.Y - state.LastBaseVelocity.Y,
             desiredVelocity.Z - state.LastBaseVelocity.Z);
         
-        // TODO: Investigate this some more
+        // TODO: SourceMod gates this path on m_hMoveParent == -1. We don't have a confirmed
+        // CS2 equivalent here yet, so assume the pawn is unparented rather than use an
+        // incorrect approximation like GroundEntity.
 
-        int moveParent = pawn.GroundEntity?.Index ?? -1;
-        
-        if (dontUseTeleport && moveParent == -1)
+        if (dontUseTeleport)
         {
             // Directly set velocity — avoids side effects of TeleportEntity.
             pawn.SetAbsVelocity(velocity);
-            pawn.SetNetVar(PhysicsConstants.NetVarVelocity,    velocity);
+            pawn.SetLocalVelocity(velocity);
+            // pawn.SetNetVar(PhysicsConstants.NetVarVelocity,  velocity);
         }
         else
         {
             // Use Teleport so the engine runs its full velocity reconciliation,
             // then restore base velocity which Teleport clears.
-            var baseVelocity = pawn.GetNetVar<Vector>(PhysicsConstants.NetVarBaseVelocity);
+            var baseVelocity = pawn.BaseVelocity;
             pawn.Teleport(null, null, velocity);
-            pawn.SetNetVar(PhysicsConstants.NetVarBaseVelocity, baseVelocity);
+            pawn.BaseVelocity = baseVelocity;
         }
     }
 }

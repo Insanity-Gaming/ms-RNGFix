@@ -22,6 +22,7 @@ public sealed class PlayerState
     public Vector LastBaseVelocity { get; set; }
 
     // Ground tracking
+    public bool WasInAirPreTick { get; set; }
     public int PreTickGroundEnt { get; set; } = -1;
     public int LastLandTick { get; set; }
 
@@ -53,6 +54,7 @@ public sealed class PlayerState
         PreCollisionVelocity = default;
         LastBaseVelocity = default;
 
+        WasInAirPreTick = false;
         PreTickGroundEnt = -1;
         LastLandTick = 0;
 

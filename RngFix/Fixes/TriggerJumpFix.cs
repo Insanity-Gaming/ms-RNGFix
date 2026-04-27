@@ -21,7 +21,7 @@ public sealed class TriggerJumpFix
     private readonly IPhysicsQueryManager _physicsQuery;
     private readonly IEntityManager _entityManager;
     private readonly ITriggerTracker _triggerTracker;
-    private readonly TriggerNatives _triggerNatives;
+    private readonly ITriggerTouchSynthesizer _triggerTouchSynthesizer;
     private readonly ILogger<TriggerJumpFix> _logger;
 
     public TriggerJumpFix(
@@ -29,15 +29,15 @@ public sealed class TriggerJumpFix
         IPhysicsQueryManager physicsQuery,
         IEntityManager entityManager,
         ITriggerTracker triggerTracker,
-        TriggerNatives triggerNatives,
+        ITriggerTouchSynthesizer triggerTouchSynthesizer,
         ILogger<TriggerJumpFix> logger)
     {
-        _conVars        = conVars;
-        _physicsQuery   = physicsQuery;
-        _entityManager  = entityManager;
-        _triggerTracker = triggerTracker;
-        _triggerNatives = triggerNatives;
-        _logger         = logger;
+        _conVars                 = conVars;
+        _physicsQuery            = physicsQuery;
+        _entityManager           = entityManager;
+        _triggerTracker          = triggerTracker;
+        _triggerTouchSynthesizer = triggerTouchSynthesizer;
+        _logger                  = logger;
     }
 
     /// <summary>
@@ -121,9 +121,7 @@ public sealed class TriggerJumpFix
                 continue;
 
             _logger.LogDebug("TriggerJumpFix applied for trigger {TriggerIdx}", triggerIdx);
-
-            // TODO: implement safe Touch call
-            _triggerNatives.Touch(entity, pawn);
+            _triggerTouchSynthesizer.EnsureTouchAfterManualTrigger(entity, pawn);
 
             didSomething = true;
         }

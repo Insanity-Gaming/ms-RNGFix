@@ -1,5 +1,6 @@
 using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Models;
+using Sharp.Shared;
 using Sharp.Shared.Enums;
 using Sharp.Shared.GameEntities;
 using Sharp.Shared.Managers;
@@ -16,6 +17,7 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
 {
     private readonly RngFixConVars _conVars;
     private readonly IPhysicsQueryManager _physicsQuery;
+    private readonly ISharedSystem _sharedSystem;
 
     // Precomputed hull vectors (CS2 values from PhysicsConstants)
     private static readonly Vector HullMins        = new(PhysicsConstants.HullMinX, PhysicsConstants.HullMinY, PhysicsConstants.HullMinZ);
@@ -28,10 +30,11 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
         InteractionLayers.WorldGeometry | InteractionLayers.Slime   | InteractionLayers.Player    |
         InteractionLayers.PhysicsProp;
 
-    public PhysicsSimulator(RngFixConVars conVars, IPhysicsQueryManager physicsQuery)
+    public PhysicsSimulator(RngFixConVars conVars, IPhysicsQueryManager physicsQuery, ISharedSystem sharedSystem)
     {
         _conVars      = conVars;
         _physicsQuery = physicsQuery;
+        _sharedSystem = sharedSystem;
     }
 
     /// <inheritdoc/>
@@ -79,7 +82,7 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
         float localGravity = pawn.GravityScale;
         if (localGravity == 0f) localGravity = 1f;
 
-        var baseVelocity = pawn.GetAbsVelocity();
+        var baseVelocity = pawn.BaseVelocity;
 
         velocity = new Vector(
             velocity.X,
@@ -117,7 +120,7 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
         if (!CanJump(state)) return;
 
         float impulse   = GetJumpImpulse();
-        bool  isDucking = (pawn.GetPlayerMovementService()?.KeyButtons.HasFlag(UserCommandButtons.Duck) ?? false)
+        bool  isDucking = pawn.GetPlayerMovementService()?.GetNetVar<bool>("m_bDucking") == true
                           || flags.HasFlag(EntityFlags.Ducking);
 
         // When ducking, velocity Z is set (not added) — this is the engine's source of the
@@ -195,7 +198,7 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
     public float GetJumpImpulse() => _conVars.JumpImpulse ?? PhysicsConstants.DefaultJumpImpulse;
 
     /// <inheritdoc/>
-    public bool IsInWater(IPlayerPawn pawn) => pawn.Flags.HasFlag(EntityFlags.WaterJump);
+    public bool IsInWater(IPlayerPawn pawn) => pawn.GetNetVar<float>(PhysicsConstants.NetVarWaterLevel) > 1f;
 
     // ──────────────────────────────── Private helpers ────────────────────────────────
 
@@ -219,11 +222,18 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
     /// Returns true if the duck transition is on cooldown.
     /// Mirrors CGameMovement::CanUnduck / the duck speed check.
     /// </summary>
-    private static bool IsDuckCoolingDown(IPlayerPawn pawn)
+    private bool IsDuckCoolingDown(IPlayerPawn pawn)
     {
-        // TODO: The time-based cooldown (sv_timebetweenducks vs m_flLastDuckTime) requires a
-        // GetGameTime() equivalent from ISharedSystem/IModSharp which is not yet confirmed.
-        // The duck speed check alone covers the primary guard used in CS2.
+        float? timeBetweenDucks = _conVars.TimeBetweenDucks;
+        if (timeBetweenDucks is not null)
+        {
+            float lastDuckTime = pawn.GetPlayerMovementService()?.GetNetVar<float>("m_flLastDuckTime") ?? 0f;
+            float gameTime = _sharedSystem.GetModSharp().GetGlobals().CurTime;
+
+            if (gameTime - lastDuckTime < timeBetweenDucks.Value)
+                return true;
+        }
+
         float duckSpeed = pawn.GetPlayerMovementService()?.DuckSpeed ?? 0f;
         return duckSpeed < PhysicsConstants.DuckMinDuckSpeed;
     }
