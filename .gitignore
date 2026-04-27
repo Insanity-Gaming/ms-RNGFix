@@ -7,3 +7,4 @@ examples/
 .idea
 /RngFix.sln.DotSettings.user
 sourcemod
+/src/game/
