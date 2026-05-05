@@ -77,10 +77,12 @@ public sealed class TelehopFix
         var mins   = cp?.Mins ?? default;
         var maxs   = cp?.Maxs ?? default;
 
-        var stuckTrace = physicsQuery.TraceShapeNoPlayers(
+        var stuckQuery = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+        stuckQuery.SetEntityToIgnore(pawn, 0);
+        var stuckTrace = physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             origin, origin,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in stuckQuery);
 
         bool isStuck = stuckTrace.DidHit();
 
