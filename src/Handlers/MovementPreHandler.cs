@@ -28,11 +28,6 @@ public sealed class MovementPreHandler : IRngModule
     private readonly InclineFix _inclineFix;
     private readonly ILogger<MovementPreHandler> _logger;
 
-    // CS2 MASK_PLAYERSOLID equivalent
-    private static readonly InteractionLayers PlayerSolidLayers =
-        InteractionLayers.Solid      | InteractionLayers.Sky        | InteractionLayers.PlayerClip |
-        InteractionLayers.WorldGeometry | InteractionLayers.Slime   | InteractionLayers.Player    |
-        InteractionLayers.PhysicsProp;
 
     public MovementPreHandler(
         ISharedSystem sharedSystem,
@@ -167,12 +162,19 @@ public sealed class MovementPreHandler : IRngModule
         var velocityTick = new Vector(velocity.X * state.FrameTime, velocity.Y * state.FrameTime, velocity.Z * state.FrameTime);
         var traceEnd     = new Vector(nextOrigin.X + velocityTick.X, nextOrigin.Y + velocityTick.Y, nextOrigin.Z + velocityTick.Z);
 
-        var trace = _physicsQuery.TraceShapeNoPlayers(
+        var collisionQuery = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
+        collisionQuery.SetEntityToIgnore(pawn, 0);
+        var trace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             nextOrigin, traceEnd,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in collisionQuery);
 
         if (!trace.DidHit()) return;
+
+        _logger.LogDebug("MovementPre collision hit — InteractsAs={A} InteractsWith={W} Group={G}",
+            trace.ShapeAttributes.InteractsAs,
+            trace.ShapeAttributes.InteractsWith,
+            trace.ShapeAttributes.CollisionGroup);
 
         var nrm            = trace.PlaneNormal;
         var collisionPoint = trace.EndPosition;
@@ -201,7 +203,7 @@ public sealed class MovementPreHandler : IRngModule
         }
 
         // Try edge bug fix.
-        if (_edgeBugFix.TryPrevent(state, velocity, origin, collisionPoint, nrm, mins, maxs, ref moveOrigin))
+        if (_edgeBugFix.TryPrevent(pawn, state, velocity, origin, collisionPoint, nrm, mins, maxs, ref moveOrigin))
         {
             obj.Info->AbsOrigin = moveOrigin;
         }

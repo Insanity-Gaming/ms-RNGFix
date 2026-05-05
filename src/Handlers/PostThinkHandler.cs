@@ -32,11 +32,6 @@ public sealed class PostThinkHandler : IRngModule
     private readonly TelehopFix _telehopFix;
     private readonly ILogger<PostThinkHandler> _logger;
 
-    // CS2 MASK_PLAYERSOLID equivalent
-    private static readonly InteractionLayers PlayerSolidLayers =
-        InteractionLayers.Solid      | InteractionLayers.Sky        | InteractionLayers.PlayerClip |
-        InteractionLayers.WorldGeometry | InteractionLayers.Slime   | InteractionLayers.Player    |
-        InteractionLayers.PhysicsProp;
 
     public PostThinkHandler(
         ISharedSystem sharedSystem,
@@ -109,10 +104,12 @@ public sealed class PostThinkHandler : IRngModule
 
             var originBelow = new Vector(origin.X, origin.Y, origin.Z - PhysicsConstants.LandHeight);
 
-            var groundTrace = _physicsQuery.TraceShapeNoPlayers(
+            var groundQuery = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
+            groundQuery.SetEntityToIgnore(pawn, 0);
+            var groundTrace = _physicsQuery.TraceShapePlayerMovement(
                 new TraceShapeRay(new TraceShapeHull { Mins = landingMins, Maxs = landingMaxs }),
                 origin, originBelow,
-                PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+                in groundQuery);
 
             if (!groundTrace.DidHit())
             {
@@ -121,6 +118,10 @@ public sealed class PostThinkHandler : IRngModule
             }
             else
             {
+                _logger.LogDebug("PostThink ground hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                    groundTrace.ShapeAttributes.InteractsAs,
+                    groundTrace.ShapeAttributes.InteractsWith,
+                    groundTrace.ShapeAttributes.CollisionGroup);
                 landingNormal = groundTrace.PlaneNormal;
                 landingPoint  = groundTrace.EndPosition;
                 landingFraction = groundTrace.Fraction;
@@ -130,6 +131,7 @@ public sealed class PostThinkHandler : IRngModule
                 if (landingNormal.Z < PhysicsConstants.MinStandableZNrm)
                 {
                     bool found = TryQuadrantGroundTrace(
+                        pawn,
                         origin, originBelow, landingMins, landingMaxs,
                         out landingNormal, out landingPoint, out landingMins, out landingMaxs, out landingFraction);
 
@@ -195,6 +197,7 @@ public sealed class PostThinkHandler : IRngModule
     /// that found ground (needed for TriggerJumpFix hull construction).
     /// </summary>
     private bool TryQuadrantGroundTrace(
+        IPlayerPawn pawn,
         in Vector origin,
         in Vector originBelow,
         in Vector origMins,
@@ -208,7 +211,7 @@ public sealed class PostThinkHandler : IRngModule
         // -x -y
         var q1Mins = origMins;
         var q1Maxs = new Vector(origMaxs.X > 0f ? 0f : origMaxs.X, origMaxs.Y > 0f ? 0f : origMaxs.Y, origMaxs.Z);
-        if (QuadrantHit(origin, originBelow, q1Mins, q1Maxs, out normal, out point, out fraction))
+        if (QuadrantHit(pawn, origin, originBelow, q1Mins, q1Maxs, out normal, out point, out fraction))
         {
             usedMins = q1Mins; usedMaxs = q1Maxs; return true;
         }
@@ -216,7 +219,7 @@ public sealed class PostThinkHandler : IRngModule
         // +x +y
         var q2Mins = new Vector(origMins.X < 0f ? 0f : origMins.X, origMins.Y < 0f ? 0f : origMins.Y, origMins.Z);
         var q2Maxs = origMaxs;
-        if (QuadrantHit(origin, originBelow, q2Mins, q2Maxs, out normal, out point, out fraction))
+        if (QuadrantHit(pawn, origin, originBelow, q2Mins, q2Maxs, out normal, out point, out fraction))
         {
             usedMins = q2Mins; usedMaxs = q2Maxs; return true;
         }
@@ -224,7 +227,7 @@ public sealed class PostThinkHandler : IRngModule
         // -x +y
         var q3Mins = new Vector(origMins.X, origMins.Y < 0f ? 0f : origMins.Y, origMins.Z);
         var q3Maxs = new Vector(origMaxs.X > 0f ? 0f : origMaxs.X, origMaxs.Y, origMaxs.Z);
-        if (QuadrantHit(origin, originBelow, q3Mins, q3Maxs, out normal, out point, out fraction))
+        if (QuadrantHit(pawn, origin, originBelow, q3Mins, q3Maxs, out normal, out point, out fraction))
         {
             usedMins = q3Mins; usedMaxs = q3Maxs; return true;
         }
@@ -232,7 +235,7 @@ public sealed class PostThinkHandler : IRngModule
         // +x -y
         var q4Mins = new Vector(origMins.X < 0f ? 0f : origMins.X, origMins.Y, origMins.Z);
         var q4Maxs = new Vector(origMaxs.X, origMaxs.Y > 0f ? 0f : origMaxs.Y, origMaxs.Z);
-        if (QuadrantHit(origin, originBelow, q4Mins, q4Maxs, out normal, out point, out fraction))
+        if (QuadrantHit(pawn, origin, originBelow, q4Mins, q4Maxs, out normal, out point, out fraction))
         {
             usedMins = q4Mins; usedMaxs = q4Maxs; return true;
         }
@@ -242,17 +245,24 @@ public sealed class PostThinkHandler : IRngModule
     }
 
     private bool QuadrantHit(
+        IPlayerPawn pawn,
         in Vector from, in Vector to,
         in Vector mins, in Vector maxs,
         out Vector normal, out Vector point, out float fraction)
     {
-        var trace = _physicsQuery.TraceShapeNoPlayers(
+        var query = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
+        query.SetEntityToIgnore(pawn, 0);
+        var trace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             from, to,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in query);
 
         if (trace.DidHit() && trace.PlaneNormal.Z >= PhysicsConstants.MinStandableZNrm)
         {
+            _logger.LogDebug("PostThink quadrant hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                trace.ShapeAttributes.InteractsAs,
+                trace.ShapeAttributes.InteractsWith,
+                trace.ShapeAttributes.CollisionGroup);
             normal = trace.PlaneNormal;
             point  = trace.EndPosition;
             fraction = trace.Fraction;

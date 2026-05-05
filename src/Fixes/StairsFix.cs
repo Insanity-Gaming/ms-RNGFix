@@ -17,10 +17,6 @@ public sealed class StairsFix
     private readonly TriggerNatives _triggerNatives;
     private readonly ILogger<StairsFix> _logger;
 
-    private static readonly InteractionLayers PlayerSolidLayers =
-        InteractionLayers.Solid | InteractionLayers.Sky | InteractionLayers.PlayerClip |
-        InteractionLayers.WorldGeometry | InteractionLayers.Slime | InteractionLayers.Player |
-        InteractionLayers.PhysicsProp;
 
     public StairsFix(
         RngFixConVars conVars,
@@ -60,18 +56,23 @@ public sealed class StairsFix
         var mins = cp.Mins;
         var maxs = cp.Maxs;
 
+        var movementQuery = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
+        movementQuery.SetEntityToIgnore(pawn, 0);
+
         float stepSize = 18.0f;
 
         // ── Step 1: Trace down ──
         var collisionPoint = state.CollisionPoint;
         var stepBottom = new Vector(collisionPoint.X, collisionPoint.Y, collisionPoint.Z - stepSize);
 
-        var downTrace = _physicsQuery.TraceShapeNoPlayers(
+        var downTrace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             collisionPoint, stepBottom,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in movementQuery);
 
         if (!downTrace.DidHit()) return false;
+        _logger.LogDebug("StairsFix down hit — InteractsAs={A} InteractsWith={W} Group={G}",
+            downTrace.ShapeAttributes.InteractsAs, downTrace.ShapeAttributes.InteractsWith, downTrace.ShapeAttributes.CollisionGroup);
         if (downTrace.PlaneNormal.Z < PhysicsConstants.MinStandableZNrm) return false;
 
         var groundBelowStep = downTrace.EndPosition;
@@ -119,32 +120,42 @@ public sealed class StairsFix
         // ── Step 3: Trace up ──
         var stepTop = new Vector(groundBelowStep.X, groundBelowStep.Y, groundBelowStep.Z + stepSize);
 
-        var upTrace = _physicsQuery.TraceShapeNoPlayers(
+        var upTrace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             groundBelowStep, stepTop,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in movementQuery);
 
+        if (upTrace.DidHit())
+            _logger.LogDebug("StairsFix up hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                upTrace.ShapeAttributes.InteractsAs, upTrace.ShapeAttributes.InteractsWith, upTrace.ShapeAttributes.CollisionGroup);
         var afterUp = upTrace.DidHit() ? upTrace.EndPosition : stepTop;
 
         // ── Step 4: Trace forward ──
         var overEnd = new Vector(afterUp.X + dirX, afterUp.Y + dirY, afterUp.Z);
 
-        var overTrace = _physicsQuery.TraceShapeNoPlayers(
+        var overTrace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             afterUp, overEnd,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in movementQuery);
 
-        if (overTrace.DidHit()) return false;
+        if (overTrace.DidHit())
+        {
+            _logger.LogDebug("StairsFix over hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                overTrace.ShapeAttributes.InteractsAs, overTrace.ShapeAttributes.InteractsWith, overTrace.ShapeAttributes.CollisionGroup);
+            return false;
+        }
 
         // ── Step 5: Trace down ──
         var dropEnd = new Vector(overEnd.X, overEnd.Y, overEnd.Z - stepSize);
 
-        var finalDownTrace = _physicsQuery.TraceShapeNoPlayers(
+        var finalDownTrace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             overEnd, dropEnd,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in movementQuery);
 
         if (!finalDownTrace.DidHit()) return false;
+        _logger.LogDebug("StairsFix finalDown hit — InteractsAs={A} InteractsWith={W} Group={G}",
+            finalDownTrace.ShapeAttributes.InteractsAs, finalDownTrace.ShapeAttributes.InteractsWith, finalDownTrace.ShapeAttributes.CollisionGroup);
         if (finalDownTrace.PlaneNormal.Z < PhysicsConstants.MinStandableZNrm) return false;
 
         var stepTopLanding = finalDownTrace.EndPosition;
