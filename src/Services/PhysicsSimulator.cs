@@ -58,9 +58,11 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
             // Wants to unduck — check if there is room to stand.
             var triedOrigin = new Vector(nextOrigin.X, nextOrigin.Y, nextOrigin.Z - PhysicsConstants.DuckDelta);
             var hull  = new TraceShapeHull { Mins = HullMins, Maxs = HullMaxsUnducked };
-            var trace = _physicsQuery.TraceShapeNoPlayers(
+            var query = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+            query.SetEntityToIgnore(pawn, 0);
+            var trace = _physicsQuery.TraceShapePlayerMovement(
                 new TraceShapeRay(hull), triedOrigin, triedOrigin,
-                PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+                in query);
 
             if (!trace.DidHit())
             {

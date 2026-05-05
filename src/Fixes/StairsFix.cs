@@ -60,16 +60,19 @@ public sealed class StairsFix
         var mins = cp.Mins;
         var maxs = cp.Maxs;
 
+        var movementQuery = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+        movementQuery.SetEntityToIgnore(pawn, 0);
+
         float stepSize = 18.0f;
 
         // ── Step 1: Trace down ──
         var collisionPoint = state.CollisionPoint;
         var stepBottom = new Vector(collisionPoint.X, collisionPoint.Y, collisionPoint.Z - stepSize);
 
-        var downTrace = _physicsQuery.TraceShapeNoPlayers(
+        var downTrace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             collisionPoint, stepBottom,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in movementQuery);
 
         if (!downTrace.DidHit()) return false;
         if (downTrace.PlaneNormal.Z < PhysicsConstants.MinStandableZNrm) return false;
@@ -119,30 +122,30 @@ public sealed class StairsFix
         // ── Step 3: Trace up ──
         var stepTop = new Vector(groundBelowStep.X, groundBelowStep.Y, groundBelowStep.Z + stepSize);
 
-        var upTrace = _physicsQuery.TraceShapeNoPlayers(
+        var upTrace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             groundBelowStep, stepTop,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in movementQuery);
 
         var afterUp = upTrace.DidHit() ? upTrace.EndPosition : stepTop;
 
         // ── Step 4: Trace forward ──
         var overEnd = new Vector(afterUp.X + dirX, afterUp.Y + dirY, afterUp.Z);
 
-        var overTrace = _physicsQuery.TraceShapeNoPlayers(
+        var overTrace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             afterUp, overEnd,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in movementQuery);
 
         if (overTrace.DidHit()) return false;
 
         // ── Step 5: Trace down ──
         var dropEnd = new Vector(overEnd.X, overEnd.Y, overEnd.Z - stepSize);
 
-        var finalDownTrace = _physicsQuery.TraceShapeNoPlayers(
+        var finalDownTrace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             overEnd, dropEnd,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in movementQuery);
 
         if (!finalDownTrace.DidHit()) return false;
         if (finalDownTrace.PlaneNormal.Z < PhysicsConstants.MinStandableZNrm) return false;

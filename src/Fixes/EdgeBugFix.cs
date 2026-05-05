@@ -2,6 +2,7 @@ using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Models;
 using Microsoft.Extensions.Logging;
 using Sharp.Shared.Enums;
+using Sharp.Shared.GameEntities;
 using Sharp.Shared.Managers;
 using Sharp.Shared.Types;
 
@@ -47,6 +48,7 @@ public sealed class EdgeBugFix
     /// <param name="moveOrigin">Reference to CMoveData origin — set this to rewind the player.</param>
     /// <returns>True if the fix was applied.</returns>
     public unsafe bool TryPrevent(
+        IPlayerPawn pawn,
         ModulePlayerState state,
         in Vector velocity,
         in Vector origin,
@@ -59,7 +61,12 @@ public sealed class EdgeBugFix
         if (!_conVars.IsEdgeEnabled) return false;
 
         // Estimate where the player will end up at tick end after the collision.
-        float fractionLeft = 1f - Trace(origin, collisionPoint, state, velocity, mins, maxs).Fraction;
+        var fractionQuery = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+        fractionQuery.SetEntityToIgnore(pawn, 0);
+        float fractionLeft = 1f - _physicsQuery.TraceShapePlayerMovement(
+            new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
+            origin, collisionPoint,
+            in fractionQuery).Fraction;
 
         Vector tickEnd;
 
@@ -94,17 +101,19 @@ public sealed class EdgeBugFix
 
         // Check if there is something to land on within LAND_HEIGHT below the estimated tick end.
         var tickEndBelow = new Vector(tickEnd.X, tickEnd.Y, tickEnd.Z - PhysicsConstants.LandHeight);
-        var groundTrace  = _physicsQuery.TraceShapeNoPlayers(
+        var groundQuery  = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+        groundQuery.SetEntityToIgnore(pawn, 0);
+        var groundTrace  = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             tickEnd, tickEndBelow,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in groundQuery);
 
         if (groundTrace.DidHit())
         {
             // There's ground nearby — check if it's actually landable.
             var nrm2 = groundTrace.PlaneNormal;
             if (nrm2.Z >= PhysicsConstants.MinStandableZNrm) return false;           // Landable — no edge bug.
-            if (TracePlayerBBoxForGround(tickEnd, tickEndBelow, mins, maxs)) return false; // Quadrant check also finds ground.
+            if (TracePlayerBBoxForGround(pawn, tickEnd, tickEndBelow, mins, maxs)) return false; // Quadrant check also finds ground.
         }
 
         // The player will not land. Rewind origin to prevent the collision.
@@ -145,44 +154,38 @@ public sealed class EdgeBugFix
     /// Checks four hull quadrants below the player to find walkable ground on steep surfaces.
     /// Mirrors CGameMovement::TracePlayerBBoxForGround.
     /// </summary>
-    private bool TracePlayerBBoxForGround(in Vector origin, in Vector originBelow, in Vector mins, in Vector maxs)
+    private bool TracePlayerBBoxForGround(IPlayerPawn pawn, in Vector origin, in Vector originBelow, in Vector mins, in Vector maxs)
     {
         // -x -y quadrant
         var q1Maxs = new Vector(maxs.X > 0f ? 0f : maxs.X, maxs.Y > 0f ? 0f : maxs.Y, maxs.Z);
-        if (HullGroundHit(origin, originBelow, mins, q1Maxs)) return true;
+        if (HullGroundHit(pawn, origin, originBelow, mins, q1Maxs)) return true;
 
         // +x +y quadrant
         var q2Mins = new Vector(mins.X < 0f ? 0f : mins.X, mins.Y < 0f ? 0f : mins.Y, mins.Z);
-        if (HullGroundHit(origin, originBelow, q2Mins, maxs)) return true;
+        if (HullGroundHit(pawn, origin, originBelow, q2Mins, maxs)) return true;
 
         // -x +y quadrant
         var q3Mins = new Vector(mins.X, mins.Y < 0f ? 0f : mins.Y, mins.Z);
         var q3Maxs = new Vector(maxs.X > 0f ? 0f : maxs.X, maxs.Y, maxs.Z);
-        if (HullGroundHit(origin, originBelow, q3Mins, q3Maxs)) return true;
+        if (HullGroundHit(pawn, origin, originBelow, q3Mins, q3Maxs)) return true;
 
         // +x -y quadrant
         var q4Mins = new Vector(mins.X < 0f ? 0f : mins.X, mins.Y, mins.Z);
         var q4Maxs = new Vector(maxs.X, maxs.Y > 0f ? 0f : maxs.Y, maxs.Z);
-        if (HullGroundHit(origin, originBelow, q4Mins, q4Maxs)) return true;
+        if (HullGroundHit(pawn, origin, originBelow, q4Mins, q4Maxs)) return true;
 
         return false;
     }
 
-    private bool HullGroundHit(in Vector from, in Vector to, in Vector mins, in Vector maxs)
+    private bool HullGroundHit(IPlayerPawn pawn, in Vector from, in Vector to, in Vector mins, in Vector maxs)
     {
-        var trace = _physicsQuery.TraceShapeNoPlayers(
+        var query = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+        query.SetEntityToIgnore(pawn, 0);
+        var trace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             from, to,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in query);
 
         return trace.DidHit() && trace.PlaneNormal.Z >= PhysicsConstants.MinStandableZNrm;
-    }
-
-    private TraceResult Trace(in Vector from, in Vector to, ModulePlayerState state, in Vector velocity, in Vector mins, in Vector maxs)
-    {
-        return _physicsQuery.TraceShapeNoPlayers(
-            new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
-            from, to,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
     }
 }

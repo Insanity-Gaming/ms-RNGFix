@@ -167,10 +167,12 @@ public sealed class MovementPreHandler : IRngModule
         var velocityTick = new Vector(velocity.X * state.FrameTime, velocity.Y * state.FrameTime, velocity.Z * state.FrameTime);
         var traceEnd     = new Vector(nextOrigin.X + velocityTick.X, nextOrigin.Y + velocityTick.Y, nextOrigin.Z + velocityTick.Z);
 
-        var trace = _physicsQuery.TraceShapeNoPlayers(
+        var collisionQuery = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+        collisionQuery.SetEntityToIgnore(pawn, 0);
+        var trace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             nextOrigin, traceEnd,
-            PlayerSolidLayers, CollisionGroupType.Default, TraceQueryFlag.All);
+            in collisionQuery);
 
         if (!trace.DidHit()) return;
 
@@ -201,7 +203,7 @@ public sealed class MovementPreHandler : IRngModule
         }
 
         // Try edge bug fix.
-        if (_edgeBugFix.TryPrevent(state, velocity, origin, collisionPoint, nrm, mins, maxs, ref moveOrigin))
+        if (_edgeBugFix.TryPrevent(pawn, state, velocity, origin, collisionPoint, nrm, mins, maxs, ref moveOrigin))
         {
             obj.Info->AbsOrigin = moveOrigin;
         }
