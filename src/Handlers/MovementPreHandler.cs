@@ -2,6 +2,7 @@ using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Fixes;
 using InsanityGaming.RngFix.Models;
 using InsanityGaming.RngFix.Services;
+using InsanityGaming.RngFix.Utils;
 using Microsoft.Extensions.Logging;
 using Sharp.Shared;
 using Sharp.Shared.Enums;
@@ -27,6 +28,7 @@ public sealed class MovementPreHandler : IRngModule
     private readonly EdgeBugFix _edgeBugFix;
     private readonly InclineFix _inclineFix;
     private readonly ILogger<MovementPreHandler> _logger;
+    private readonly HitRateLogger _collisionHitLogger;
 
 
     public MovementPreHandler(
@@ -39,14 +41,16 @@ public sealed class MovementPreHandler : IRngModule
         InclineFix inclineFix,
         ILogger<MovementPreHandler> logger)
     {
-        _sharedSystem = sharedSystem;
-        _playerState  = playerState;
-        _physics      = physics;
-        _physicsQuery = physicsQuery;
-        _conVars      = conVars;
-        _edgeBugFix   = edgeBugFix;
-        _inclineFix   = inclineFix;
-        _logger       = logger;
+        _sharedSystem       = sharedSystem;
+        _playerState        = playerState;
+        _physics            = physics;
+        _physicsQuery       = physicsQuery;
+        _conVars            = conVars;
+        _edgeBugFix         = edgeBugFix;
+        _inclineFix         = inclineFix;
+        _logger             = logger;
+        // Baseline: ~23 hits / 11 ticks / 12 players observed on a normal surf session.
+        _collisionHitLogger = new HitRateLogger("MovementPre.Collision", sharedSystem, logger, 23f / 11f / 12f * 1.5f);
     }
 
     public bool Init()
@@ -172,6 +176,11 @@ public sealed class MovementPreHandler : IRngModule
         if (!trace.DidHit()) return;
 
         _logger.LogDebug("MovementPre collision hit — InteractsAs={A} InteractsWith={W} Group={G}",
+            trace.ShapeAttributes.InteractsAs,
+            trace.ShapeAttributes.InteractsWith,
+            trace.ShapeAttributes.CollisionGroup);
+        _collisionHitLogger.Record(
+            pawn.Index,
             trace.ShapeAttributes.InteractsAs,
             trace.ShapeAttributes.InteractsWith,
             trace.ShapeAttributes.CollisionGroup);
