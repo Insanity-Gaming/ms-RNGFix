@@ -7,7 +7,7 @@ public static class PhysicsConstants
     // CS2 MASK_PLAYERSOLID equivalent — single definition, edit here to affect all traces
     public static readonly InteractionLayers PlayerSolidLayers =
         InteractionLayers.Solid         /*| InteractionLayers.Sky  */       | InteractionLayers.PlayerClip |
-        InteractionLayers.WorldGeometry | InteractionLayers.Slime       | InteractionLayers.Player     |
+        InteractionLayers.WorldGeometry | InteractionLayers.Slime       /*| InteractionLayers.Player */    |
         InteractionLayers.PhysicsProp;
 
     // Engine physics constants (do NOT change — match CS2 engine values)
