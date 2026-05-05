@@ -1,7 +1,9 @@
 using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Models;
 using InsanityGaming.RngFix.Services;
+using InsanityGaming.RngFix.Utils;
 using Microsoft.Extensions.Logging;
+using Sharp.Shared;
 using Sharp.Shared.Enums;
 using Sharp.Shared.GameEntities;
 using Sharp.Shared.Managers;
@@ -27,13 +29,15 @@ public sealed class TelehopFix
     private readonly RngFixConVars _conVars;
     private readonly IPhysicsSimulator _physics;
     private readonly ILogger<TelehopFix> _logger;
+    private readonly HitRateLogger _stuckHitLogger;
 
 
-    public TelehopFix(RngFixConVars conVars, IPhysicsSimulator physics, ILogger<TelehopFix> logger)
+    public TelehopFix(RngFixConVars conVars, IPhysicsSimulator physics, ISharedSystem sharedSystem, ILogger<TelehopFix> logger)
     {
-        _conVars = conVars;
-        _physics  = physics;
-        _logger   = logger;
+        _conVars        = conVars;
+        _physics        = physics;
+        _logger         = logger;
+        _stuckHitLogger = new HitRateLogger("TelehopFix.Stuck", sharedSystem, logger, 0f);
     }
 
     /// <summary>
@@ -82,10 +86,17 @@ public sealed class TelehopFix
         bool isStuck = stuckTrace.DidHit();
 
         if (isStuck)
+        {
             _logger.LogDebug("TelehopFix stuck hit — InteractsAs={A} InteractsWith={W} Group={G}",
                 stuckTrace.ShapeAttributes.InteractsAs,
                 stuckTrace.ShapeAttributes.InteractsWith,
                 stuckTrace.ShapeAttributes.CollisionGroup);
+            _stuckHitLogger.Record(
+                pawn.Index,
+                stuckTrace.ShapeAttributes.InteractsAs,
+                stuckTrace.ShapeAttributes.InteractsWith,
+                stuckTrace.ShapeAttributes.CollisionGroup);
+        }
 
         _logger.LogDebug("TelehopFix applied (stuck={IsStuck})", isStuck);
         InclineFix.SetVelocity(pawn, newVelocity, state, dontUseTeleport: isStuck);

@@ -2,6 +2,7 @@ using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Fixes;
 using InsanityGaming.RngFix.Models;
 using InsanityGaming.RngFix.Services;
+using InsanityGaming.RngFix.Utils;
 using Microsoft.Extensions.Logging;
 using Sharp.Shared;
 using Sharp.Shared.Enums;
@@ -31,6 +32,8 @@ public sealed class PostThinkHandler : IRngModule
     private readonly InclineFix _inclineFix;
     private readonly TelehopFix _telehopFix;
     private readonly ILogger<PostThinkHandler> _logger;
+    private readonly HitRateLogger _groundHitLogger;
+    private readonly HitRateLogger _quadrantHitLogger;
 
 
     public PostThinkHandler(
@@ -44,15 +47,17 @@ public sealed class PostThinkHandler : IRngModule
         TelehopFix telehopFix,
         ILogger<PostThinkHandler> logger)
     {
-        _sharedSystem   = sharedSystem;
-        _playerState    = playerState;
-        _physicsQuery   = physicsQuery;
-        _conVars        = conVars;
-        _triggerJumpFix = triggerJumpFix;
-        _stairsFix      = stairsFix;
-        _inclineFix     = inclineFix;
-        _telehopFix     = telehopFix;
-        _logger         = logger;
+        _sharedSystem      = sharedSystem;
+        _playerState       = playerState;
+        _physicsQuery      = physicsQuery;
+        _conVars           = conVars;
+        _triggerJumpFix    = triggerJumpFix;
+        _stairsFix         = stairsFix;
+        _inclineFix        = inclineFix;
+        _telehopFix        = telehopFix;
+        _logger            = logger;
+        _groundHitLogger   = new HitRateLogger("PostThink.Ground",   sharedSystem, logger, 0.15f);
+        _quadrantHitLogger = new HitRateLogger("PostThink.Quadrant", sharedSystem, logger, 0.05f);
     }
 
     public bool Init()
@@ -119,6 +124,11 @@ public sealed class PostThinkHandler : IRngModule
             else
             {
                 _logger.LogDebug("PostThink ground hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                    groundTrace.ShapeAttributes.InteractsAs,
+                    groundTrace.ShapeAttributes.InteractsWith,
+                    groundTrace.ShapeAttributes.CollisionGroup);
+                _groundHitLogger.Record(
+                    entityIndex,
                     groundTrace.ShapeAttributes.InteractsAs,
                     groundTrace.ShapeAttributes.InteractsWith,
                     groundTrace.ShapeAttributes.CollisionGroup);
@@ -260,6 +270,11 @@ public sealed class PostThinkHandler : IRngModule
         if (trace.DidHit() && trace.PlaneNormal.Z >= PhysicsConstants.MinStandableZNrm)
         {
             _logger.LogDebug("PostThink quadrant hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                trace.ShapeAttributes.InteractsAs,
+                trace.ShapeAttributes.InteractsWith,
+                trace.ShapeAttributes.CollisionGroup);
+            _quadrantHitLogger.Record(
+                pawn.Index,
                 trace.ShapeAttributes.InteractsAs,
                 trace.ShapeAttributes.InteractsWith,
                 trace.ShapeAttributes.CollisionGroup);

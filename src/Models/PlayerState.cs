@@ -38,6 +38,12 @@ public sealed class PlayerState
     // Trigger touch tracking (get-only HashSet, never replaced)
     public HashSet<int> TouchingTriggers { get; } = new();
 
+    // Per-player hull cache — populated lazily by PhysicsSimulator.SimulateDuck
+    public Vector? HullMins { get; set; }
+    public Vector? HullMaxsUnducked { get; set; }
+    public Vector? HullMaxsDucked { get; set; }
+    public float?  DuckDelta { get; set; }
+
     public void Reset()
     {
         Tick = 0;
@@ -66,5 +72,10 @@ public sealed class PlayerState
         MapTeleportedSequentialTicks = false;
 
         TouchingTriggers.Clear();
+
+        HullMins = null;
+        HullMaxsUnducked = null;
+        HullMaxsDucked = null;
+        DuckDelta = null;
     }
 }

@@ -13,32 +13,20 @@ public static class PhysicsConstants
     // Engine physics constants (do NOT change — match CS2 engine values)
     public const float LandHeight = 2.0f;
     public const float NonJumpVelocity = 140.0f;
-    public const float MinStandableZNrm = 0.7f;
+    public const float MinStandableZNrm = 0.7f; // TODO: Update this to be FindConVar("sv_standable_normal").GetFloat()
     public const float AirSpeedCap = 30.0f;
     public const float DuckMinDuckSpeed = 1.5f;
     public const float DefaultJumpImpulse = 301.99337741f;
 
-    // CS2 player hull dimensions
-    public const float HullMinX = -16.0f;
-    public const float HullMinY = -16.0f;
-    public const float HullMinZ = 0.0f;
-    public const float HullMaxX = 16.0f;
-    public const float HullMaxY = 16.0f;
-    public const float HullMaxZUnducked = 72.0f;
-    public const float HullMaxZDucked = 64.0f;
-    public const float DuckDelta = (HullMaxZUnducked - HullMaxZDucked) / 2f; // 4.0f
-
-    // Entity flags (CS2 values)
-    public const int FL_ONGROUND = 1 << 0;
-    public const int FL_DUCKING = 1 << 1;
-    public const int FL_BASEVELOCITY = 1 << 9;
-
-    // Move types
-    public const int MoveTypeWalk = 2;
-
-    // Input button flags (CS2 64-bit buttons)
-    public const ulong IN_JUMP = 2UL;
-    public const ulong IN_DUCK = 4UL;
+    // Cold-start fallback hull dimensions — only used by PhysicsSimulator until per-player cache warms up
+    internal const float HullMinX = -16.0f;
+    internal const float HullMinY = -16.0f;
+    internal const float HullMinZ = 0.0f;
+    internal const float HullMaxX = 16.0f;
+    internal const float HullMaxY = 16.0f;
+    internal const float HullMaxZUnducked = 72.0f;
+    internal const float HullMaxZDucked = 64.0f;
+    internal const float DuckDelta = (HullMaxZUnducked - HullMaxZDucked) / 2f; // 4.0f
 
     // NetVar string keys (cached as constants to avoid string allocation in hot path)
     // public const string NetVarBaseVelocity = "m_vecBaseVelocity";

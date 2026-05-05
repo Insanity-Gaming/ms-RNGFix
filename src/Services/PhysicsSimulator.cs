@@ -19,10 +19,10 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
     private readonly IPhysicsQueryManager _physicsQuery;
     private readonly ISharedSystem _sharedSystem;
 
-    // Precomputed hull vectors (CS2 values from PhysicsConstants)
-    private static readonly Vector HullMins        = new(PhysicsConstants.HullMinX, PhysicsConstants.HullMinY, PhysicsConstants.HullMinZ);
-    private static readonly Vector HullMaxsUnducked = new(PhysicsConstants.HullMaxX, PhysicsConstants.HullMaxY, PhysicsConstants.HullMaxZUnducked);
-    private static readonly Vector HullMaxsDucked   = new(PhysicsConstants.HullMaxX, PhysicsConstants.HullMaxY, PhysicsConstants.HullMaxZDucked);
+    // Cold-start fallback hull vectors — used until per-player cache warms up (CS2 engine values)
+    private static readonly Vector FallbackHullMins        = new(PhysicsConstants.HullMinX, PhysicsConstants.HullMinY, PhysicsConstants.HullMinZ);
+    private static readonly Vector FallbackHullMaxsUnducked = new(PhysicsConstants.HullMaxX, PhysicsConstants.HullMaxY, PhysicsConstants.HullMaxZUnducked);
+    private static readonly Vector FallbackHullMaxsDucked   = new(PhysicsConstants.HullMaxX, PhysicsConstants.HullMaxY, PhysicsConstants.HullMaxZDucked);
 
 
     public PhysicsSimulator(RngFixConVars conVars, IPhysicsQueryManager physicsQuery, ISharedSystem sharedSystem)
@@ -35,6 +35,13 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
     /// <inheritdoc/>
     public void SimulateDuck(ModulePlayerState state, IPlayerPawn pawn, ref Vector nextOrigin, out Vector mins, out Vector maxs)
     {
+        RefreshHullCache(state, pawn);
+
+        Vector hullMins         = state.HullMins         ?? FallbackHullMins;
+        Vector hullMaxsUnducked = state.HullMaxsUnducked ?? FallbackHullMaxsUnducked;
+        Vector hullMaxsDucked   = state.HullMaxsDucked   ?? FallbackHullMaxsDucked;
+        float  duckDelta        = state.DuckDelta        ?? PhysicsConstants.DuckDelta;
+
         EntityFlags flags = pawn.Flags;
         bool ducking     = flags.HasFlag(EntityFlags.Ducking);
         bool nextDucking = ducking;
@@ -44,15 +51,15 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
             // Wants to duck and currently standing — try to transition to ducked.
             if (!IsDuckCoolingDown(pawn))
             {
-                nextOrigin   = new Vector(nextOrigin.X, nextOrigin.Y, nextOrigin.Z + PhysicsConstants.DuckDelta);
+                nextOrigin   = new Vector(nextOrigin.X, nextOrigin.Y, nextOrigin.Z + duckDelta);
                 nextDucking  = true;
             }
         }
         else if (!state.Buttons.HasFlag(UserCommandButtons.Duck) && ducking)
         {
             // Wants to unduck — check if there is room to stand.
-            var triedOrigin = new Vector(nextOrigin.X, nextOrigin.Y, nextOrigin.Z - PhysicsConstants.DuckDelta);
-            var hull  = new TraceShapeHull { Mins = HullMins, Maxs = HullMaxsUnducked };
+            var triedOrigin = new Vector(nextOrigin.X, nextOrigin.Y, nextOrigin.Z - duckDelta);
+            var hull  = new TraceShapeHull { Mins = hullMins, Maxs = hullMaxsUnducked };
             var query = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
             query.SetEntityToIgnore(pawn, 0);
             var trace = _physicsQuery.TraceShapePlayerMovement(
@@ -67,8 +74,8 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
             // else: stuck — cannot unduck, leave origin unchanged
         }
 
-        mins = HullMins;
-        maxs = nextDucking ? HullMaxsDucked : HullMaxsUnducked;
+        mins = hullMins;
+        maxs = nextDucking ? hullMaxsDucked : hullMaxsUnducked;
     }
 
     /// <inheritdoc/>
@@ -198,6 +205,21 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
     public bool IsInWater(IPlayerPawn pawn) => pawn.GetNetVar<float>(PhysicsConstants.NetVarWaterLevel) > 1f;
 
     // ──────────────────────────────── Private helpers ────────────────────────────────
+
+    private static void RefreshHullCache(ModulePlayerState state, IPlayerPawn pawn)
+    {
+        var cp = pawn.GetCollisionProperty();
+        if (cp is null) return;
+
+        bool ducking = pawn.Flags.HasFlag(EntityFlags.Ducking);
+
+        state.HullMins = cp.Mins;
+        if (ducking) state.HullMaxsDucked   = cp.Maxs;
+        else         state.HullMaxsUnducked = cp.Maxs;
+
+        if (state.HullMaxsUnducked is { } u && state.HullMaxsDucked is { } d)
+            state.DuckDelta = (u.Z - d.Z) / 2f;
+    }
 
     /// <summary>
     /// Returns true if the player is allowed to initiate a jump this tick.
