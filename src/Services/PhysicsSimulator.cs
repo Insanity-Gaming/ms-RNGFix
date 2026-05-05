@@ -24,11 +24,6 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
     private static readonly Vector HullMaxsUnducked = new(PhysicsConstants.HullMaxX, PhysicsConstants.HullMaxY, PhysicsConstants.HullMaxZUnducked);
     private static readonly Vector HullMaxsDucked   = new(PhysicsConstants.HullMaxX, PhysicsConstants.HullMaxY, PhysicsConstants.HullMaxZDucked);
 
-    // CS2 equivalent of MASK_PLAYERSOLID
-    private static readonly InteractionLayers PlayerSolidLayers =
-        InteractionLayers.Solid      | InteractionLayers.Sky        | InteractionLayers.PlayerClip |
-        InteractionLayers.WorldGeometry | InteractionLayers.Slime   | InteractionLayers.Player    |
-        InteractionLayers.PhysicsProp;
 
     public PhysicsSimulator(RngFixConVars conVars, IPhysicsQueryManager physicsQuery, ISharedSystem sharedSystem)
     {
@@ -58,7 +53,7 @@ public sealed class PhysicsSimulator : IPhysicsSimulator
             // Wants to unduck — check if there is room to stand.
             var triedOrigin = new Vector(nextOrigin.X, nextOrigin.Y, nextOrigin.Z - PhysicsConstants.DuckDelta);
             var hull  = new TraceShapeHull { Mins = HullMins, Maxs = HullMaxsUnducked };
-            var query = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+            var query = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
             query.SetEntityToIgnore(pawn, 0);
             var trace = _physicsQuery.TraceShapePlayerMovement(
                 new TraceShapeRay(hull), triedOrigin, triedOrigin,

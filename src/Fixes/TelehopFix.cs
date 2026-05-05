@@ -28,11 +28,6 @@ public sealed class TelehopFix
     private readonly IPhysicsSimulator _physics;
     private readonly ILogger<TelehopFix> _logger;
 
-    // CS2 MASK_PLAYERSOLID equivalent
-    private static readonly InteractionLayers PlayerSolidLayers =
-        InteractionLayers.Solid      | InteractionLayers.Sky        | InteractionLayers.PlayerClip |
-        InteractionLayers.WorldGeometry | InteractionLayers.Slime   | InteractionLayers.Player    |
-        InteractionLayers.PhysicsProp;
 
     public TelehopFix(RngFixConVars conVars, IPhysicsSimulator physics, ILogger<TelehopFix> logger)
     {
@@ -77,7 +72,7 @@ public sealed class TelehopFix
         var mins   = cp?.Mins ?? default;
         var maxs   = cp?.Maxs ?? default;
 
-        var stuckQuery = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+        var stuckQuery = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
         stuckQuery.SetEntityToIgnore(pawn, 0);
         var stuckTrace = physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
@@ -85,6 +80,12 @@ public sealed class TelehopFix
             in stuckQuery);
 
         bool isStuck = stuckTrace.DidHit();
+
+        if (isStuck)
+            _logger.LogDebug("TelehopFix stuck hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                stuckTrace.ShapeAttributes.InteractsAs,
+                stuckTrace.ShapeAttributes.InteractsWith,
+                stuckTrace.ShapeAttributes.CollisionGroup);
 
         _logger.LogDebug("TelehopFix applied (stuck={IsStuck})", isStuck);
         InclineFix.SetVelocity(pawn, newVelocity, state, dontUseTeleport: isStuck);

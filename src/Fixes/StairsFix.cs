@@ -17,10 +17,6 @@ public sealed class StairsFix
     private readonly TriggerNatives _triggerNatives;
     private readonly ILogger<StairsFix> _logger;
 
-    private static readonly InteractionLayers PlayerSolidLayers =
-        InteractionLayers.Solid | InteractionLayers.Sky | InteractionLayers.PlayerClip |
-        InteractionLayers.WorldGeometry | InteractionLayers.Slime | InteractionLayers.Player |
-        InteractionLayers.PhysicsProp;
 
     public StairsFix(
         RngFixConVars conVars,
@@ -60,7 +56,7 @@ public sealed class StairsFix
         var mins = cp.Mins;
         var maxs = cp.Maxs;
 
-        var movementQuery = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+        var movementQuery = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
         movementQuery.SetEntityToIgnore(pawn, 0);
 
         float stepSize = 18.0f;
@@ -75,6 +71,8 @@ public sealed class StairsFix
             in movementQuery);
 
         if (!downTrace.DidHit()) return false;
+        _logger.LogDebug("StairsFix down hit — InteractsAs={A} InteractsWith={W} Group={G}",
+            downTrace.ShapeAttributes.InteractsAs, downTrace.ShapeAttributes.InteractsWith, downTrace.ShapeAttributes.CollisionGroup);
         if (downTrace.PlaneNormal.Z < PhysicsConstants.MinStandableZNrm) return false;
 
         var groundBelowStep = downTrace.EndPosition;
@@ -127,6 +125,9 @@ public sealed class StairsFix
             groundBelowStep, stepTop,
             in movementQuery);
 
+        if (upTrace.DidHit())
+            _logger.LogDebug("StairsFix up hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                upTrace.ShapeAttributes.InteractsAs, upTrace.ShapeAttributes.InteractsWith, upTrace.ShapeAttributes.CollisionGroup);
         var afterUp = upTrace.DidHit() ? upTrace.EndPosition : stepTop;
 
         // ── Step 4: Trace forward ──
@@ -137,7 +138,12 @@ public sealed class StairsFix
             afterUp, overEnd,
             in movementQuery);
 
-        if (overTrace.DidHit()) return false;
+        if (overTrace.DidHit())
+        {
+            _logger.LogDebug("StairsFix over hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                overTrace.ShapeAttributes.InteractsAs, overTrace.ShapeAttributes.InteractsWith, overTrace.ShapeAttributes.CollisionGroup);
+            return false;
+        }
 
         // ── Step 5: Trace down ──
         var dropEnd = new Vector(overEnd.X, overEnd.Y, overEnd.Z - stepSize);
@@ -148,6 +154,8 @@ public sealed class StairsFix
             in movementQuery);
 
         if (!finalDownTrace.DidHit()) return false;
+        _logger.LogDebug("StairsFix finalDown hit — InteractsAs={A} InteractsWith={W} Group={G}",
+            finalDownTrace.ShapeAttributes.InteractsAs, finalDownTrace.ShapeAttributes.InteractsWith, finalDownTrace.ShapeAttributes.CollisionGroup);
         if (finalDownTrace.PlaneNormal.Z < PhysicsConstants.MinStandableZNrm) return false;
 
         var stepTopLanding = finalDownTrace.EndPosition;

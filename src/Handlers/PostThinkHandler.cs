@@ -32,11 +32,6 @@ public sealed class PostThinkHandler : IRngModule
     private readonly TelehopFix _telehopFix;
     private readonly ILogger<PostThinkHandler> _logger;
 
-    // CS2 MASK_PLAYERSOLID equivalent
-    private static readonly InteractionLayers PlayerSolidLayers =
-        InteractionLayers.Solid      | InteractionLayers.Sky        | InteractionLayers.PlayerClip |
-        InteractionLayers.WorldGeometry | InteractionLayers.Slime   | InteractionLayers.Player    |
-        InteractionLayers.PhysicsProp;
 
     public PostThinkHandler(
         ISharedSystem sharedSystem,
@@ -109,7 +104,7 @@ public sealed class PostThinkHandler : IRngModule
 
             var originBelow = new Vector(origin.X, origin.Y, origin.Z - PhysicsConstants.LandHeight);
 
-            var groundQuery = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+            var groundQuery = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
             groundQuery.SetEntityToIgnore(pawn, 0);
             var groundTrace = _physicsQuery.TraceShapePlayerMovement(
                 new TraceShapeRay(new TraceShapeHull { Mins = landingMins, Maxs = landingMaxs }),
@@ -123,6 +118,10 @@ public sealed class PostThinkHandler : IRngModule
             }
             else
             {
+                _logger.LogDebug("PostThink ground hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                    groundTrace.ShapeAttributes.InteractsAs,
+                    groundTrace.ShapeAttributes.InteractsWith,
+                    groundTrace.ShapeAttributes.CollisionGroup);
                 landingNormal = groundTrace.PlaneNormal;
                 landingPoint  = groundTrace.EndPosition;
                 landingFraction = groundTrace.Fraction;
@@ -251,7 +250,7 @@ public sealed class PostThinkHandler : IRngModule
         in Vector mins, in Vector maxs,
         out Vector normal, out Vector point, out float fraction)
     {
-        var query = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+        var query = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
         query.SetEntityToIgnore(pawn, 0);
         var trace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
@@ -260,6 +259,10 @@ public sealed class PostThinkHandler : IRngModule
 
         if (trace.DidHit() && trace.PlaneNormal.Z >= PhysicsConstants.MinStandableZNrm)
         {
+            _logger.LogDebug("PostThink quadrant hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                trace.ShapeAttributes.InteractsAs,
+                trace.ShapeAttributes.InteractsWith,
+                trace.ShapeAttributes.CollisionGroup);
             normal = trace.PlaneNormal;
             point  = trace.EndPosition;
             fraction = trace.Fraction;

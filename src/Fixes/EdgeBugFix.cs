@@ -21,11 +21,6 @@ public sealed class EdgeBugFix
     private readonly IPhysicsQueryManager _physicsQuery;
     private readonly ILogger<EdgeBugFix> _logger;
 
-    // CS2 MASK_PLAYERSOLID equivalent
-    private static readonly InteractionLayers PlayerSolidLayers =
-        InteractionLayers.Solid      | InteractionLayers.Sky        | InteractionLayers.PlayerClip |
-        InteractionLayers.WorldGeometry | InteractionLayers.Slime   | InteractionLayers.Player    |
-        InteractionLayers.PhysicsProp;
 
     public EdgeBugFix(RngFixConVars conVars, IPhysicsQueryManager physicsQuery, ILogger<EdgeBugFix> logger)
     {
@@ -61,16 +56,22 @@ public sealed class EdgeBugFix
         if (!_conVars.IsEdgeEnabled) return false;
 
         // Estimate where the player will end up at tick end after the collision.
-        var fractionQuery = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+        var fractionQuery = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
         fractionQuery.SetEntityToIgnore(pawn, 0);
-        float fractionLeft = 1f - _physicsQuery.TraceShapePlayerMovement(
+        var fractionTrace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             origin, collisionPoint,
-            in fractionQuery).Fraction;
+            in fractionQuery);
+        if (fractionTrace.DidHit())
+            _logger.LogDebug("EdgeBug fraction hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                fractionTrace.ShapeAttributes.InteractsAs,
+                fractionTrace.ShapeAttributes.InteractsWith,
+                fractionTrace.ShapeAttributes.CollisionGroup);
+        float fractionLeft = 1f - fractionTrace.Fraction;
 
         Vector tickEnd;
 
-        if (collisionNormal.Z == 1f)
+        if (Math.Abs(collisionNormal.Z - 1f) < 0.01)
         {
             // Level ground: all that changes after collision is Z velocity becomes zero.
             var velocityTick = new Vector(velocity.X * state.FrameTime, velocity.Y * state.FrameTime, velocity.Z * state.FrameTime);
@@ -101,7 +102,7 @@ public sealed class EdgeBugFix
 
         // Check if there is something to land on within LAND_HEIGHT below the estimated tick end.
         var tickEndBelow = new Vector(tickEnd.X, tickEnd.Y, tickEnd.Z - PhysicsConstants.LandHeight);
-        var groundQuery  = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+        var groundQuery  = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
         groundQuery.SetEntityToIgnore(pawn, 0);
         var groundTrace  = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
@@ -110,6 +111,10 @@ public sealed class EdgeBugFix
 
         if (groundTrace.DidHit())
         {
+            _logger.LogDebug("EdgeBug ground hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                groundTrace.ShapeAttributes.InteractsAs,
+                groundTrace.ShapeAttributes.InteractsWith,
+                groundTrace.ShapeAttributes.CollisionGroup);
             // There's ground nearby — check if it's actually landable.
             var nrm2 = groundTrace.PlaneNormal;
             if (nrm2.Z >= PhysicsConstants.MinStandableZNrm) return false;           // Landable — no edge bug.
@@ -179,13 +184,19 @@ public sealed class EdgeBugFix
 
     private bool HullGroundHit(IPlayerPawn pawn, in Vector from, in Vector to, in Vector mins, in Vector maxs)
     {
-        var query = RnQueryShapeAttr.PlayerMovement(PlayerSolidLayers);
+        var query = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
         query.SetEntityToIgnore(pawn, 0);
         var trace = _physicsQuery.TraceShapePlayerMovement(
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             from, to,
             in query);
 
-        return trace.DidHit() && trace.PlaneNormal.Z >= PhysicsConstants.MinStandableZNrm;
+        bool hit = trace.DidHit() && trace.PlaneNormal.Z >= PhysicsConstants.MinStandableZNrm;
+        if (hit)
+            _logger.LogDebug("EdgeBug hull quadrant hit — InteractsAs={A} InteractsWith={W} Group={G}",
+                trace.ShapeAttributes.InteractsAs,
+                trace.ShapeAttributes.InteractsWith,
+                trace.ShapeAttributes.CollisionGroup);
+        return hit;
     }
 }
