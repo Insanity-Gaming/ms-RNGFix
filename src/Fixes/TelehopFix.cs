@@ -98,6 +98,26 @@ public sealed class TelehopFix
                 stuckTrace.ShapeAttributes.CollisionGroup);
         }
 
+        // Safety check: trace the restored velocity for one tick from the post-teleport origin.
+        // If the path is immediately blocked (very low fraction), the player is likely at a reset
+        // spawn pressed against solid geometry — skip restoration to avoid pushing them into it.
+        var safetyEnd = new Vector(
+            origin.X + newVelocity.X * state.FrameTime,
+            origin.Y + newVelocity.Y * state.FrameTime,
+            origin.Z + newVelocity.Z * state.FrameTime);
+        var safetyQuery = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
+        safetyQuery.SetEntityToIgnore(pawn, 0);
+        var safetyTrace = physicsQuery.TraceShapePlayerMovement(
+            new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
+            origin, safetyEnd,
+            in safetyQuery);
+
+        if (safetyTrace.Fraction < 0.1f)
+        {
+            _logger.LogDebug("TelehopFix skipped — safety trace blocked (fraction={F:F3})", safetyTrace.Fraction);
+            return false;
+        }
+
         _logger.LogDebug("TelehopFix applied (stuck={IsStuck})", isStuck);
         InclineFix.SetVelocity(pawn, newVelocity, state, dontUseTeleport: isStuck);
         return true;
