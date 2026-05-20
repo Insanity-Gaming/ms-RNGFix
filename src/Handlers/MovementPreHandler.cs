@@ -69,13 +69,14 @@ public sealed class MovementPreHandler : IRngModule
     {
         // Get the player pawn from the hook params.
         var pawn = obj.Pawn;
+        var controller = obj.Controller;
 
         int entityIndex = pawn.Index;
         var state = _playerState.GetOrCreate(entityIndex);
 
         // Always increment tick and clear per-tick state.
         state.Tick++;
-        state.FrameTime = GetTickInterval() * 1.0f;
+        state.FrameTime = GetTickInterval() * controller.LaggedMovement;
         state.MapTeleportedSequentialTicks = false;
         state.WasInAirPreTick = obj.Info->InAir;
 
