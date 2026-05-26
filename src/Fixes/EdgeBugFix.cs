@@ -55,6 +55,12 @@ public sealed class EdgeBugFix
     {
         if (!_conVars.IsEdgeEnabled) return false;
 
+        // Skip if the player is inside a trigger_teleport — PreventCollision places the rewound
+        // origin above the collision point (falling velocity is negative, so subtracting it adds
+        // height). This elevated AbsOrigin shifts the player's offset in relative teleports,
+        // causing them to arrive at the destination too high and clip into the ceiling.
+        if (state.TouchingTeleportTriggerCount > 0) return false;
+
         // Estimate where the player will end up at tick end after the collision.
         var fractionQuery = RnQueryShapeAttr.PlayerMovement(PhysicsConstants.PlayerSolidLayers);
         fractionQuery.SetEntityToIgnore(pawn, 0);
