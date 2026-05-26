@@ -171,15 +171,27 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
 
         int playerIdx  = pawn.Index;
         int triggerIdx = entity.Index;
+        bool isTeleportTrigger = _teleportTriggers.Contains(triggerIdx);
 
         if (output.Equals("OnStartTouch", StringComparison.OrdinalIgnoreCase))
         {
             _triggerTracker.SetTouching(playerIdx, triggerIdx, true);
+            if (isTeleportTrigger)
+            {
+                var state = _playerStateService.Get(playerIdx);
+                if (state is not null) state.TouchingTeleportTriggerCount++;
+            }
         }
         else if (output.Equals("OnEndTouch", StringComparison.OrdinalIgnoreCase))
         {
             _triggerTracker.SetTouching(playerIdx, triggerIdx, false);
             _serviceProvider.GetRequiredService<ITriggerTouchSynthesizer>().CleanupSyntheticTouch(entity, pawn);
+            if (isTeleportTrigger)
+            {
+                var state = _playerStateService.Get(playerIdx);
+                if (state is not null && state.TouchingTeleportTriggerCount > 0)
+                    state.TouchingTeleportTriggerCount--;
+            }
         }
 
         return EHookAction.Ignored;

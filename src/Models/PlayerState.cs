@@ -38,6 +38,9 @@ public sealed class PlayerState
     // Trigger touch tracking (get-only HashSet, never replaced)
     public HashSet<int> TouchingTriggers { get; } = new();
 
+    // Count of trigger_teleport entities currently touching this player
+    public int TouchingTeleportTriggerCount { get; set; }
+
     // Per-player hull cache — populated lazily by PhysicsSimulator.SimulateDuck
     public Vector? HullMins { get; set; }
     public Vector? HullMaxsUnducked { get; set; }
@@ -72,6 +75,7 @@ public sealed class PlayerState
         MapTeleportedSequentialTicks = false;
 
         TouchingTriggers.Clear();
+        TouchingTeleportTriggerCount = 0;
 
         HullMins = null;
         HullMaxsUnducked = null;

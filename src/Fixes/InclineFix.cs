@@ -54,6 +54,11 @@ public sealed class InclineFix
     {
         if (_conVars.UphillMode != PhysicsConstants.UphillNeutral) return false;
 
+        // Skip if the player is inside a trigger_teleport — rewinding their CMoveData origin
+        // can shift their position relative to the trigger, causing relative teleports to land
+        // them at the wrong height or causing them to bypass the trigger entirely.
+        if (state.TouchingTeleportTriggerCount > 0) return false;
+
         // Must be an inclined surface (not flat).
         if (collisionNormal.Z >= 1f) return false;
 
