@@ -68,6 +68,12 @@ public sealed class TelehopFix
         var newVelocity = state.PreCollisionVelocity;
         _physics.FinishGravity(state, pawn, ref newVelocity);
 
+        // Never restore upward Z velocity through a teleport. TelehopFix exists to preserve
+        // horizontal speed; positive Z at the destination would let players gain height at
+        // reset spawns by holding jump while ascending slowly (0 < Z ≤ NonJumpVelocity).
+        if (newVelocity.Z > 0f)
+            newVelocity = new Vector(newVelocity.X, newVelocity.Y, 0f);
+
         // If the player appears to be stuck after teleporting (e.g. destination is flush with
         // the floor), set velocity directly to avoid TeleportEntity's side-effects causing a
         // deeper penetration into the ground.

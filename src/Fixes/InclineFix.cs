@@ -54,6 +54,11 @@ public sealed class InclineFix
     {
         if (_conVars.UphillMode != PhysicsConstants.UphillNeutral) return false;
 
+        // Skip if the player is inside a trigger_teleport — rewinding their CMoveData origin
+        // can shift their position relative to the trigger, causing relative teleports to land
+        // them at the wrong height or causing them to bypass the trigger entirely.
+        if (state.TouchingTeleportTriggerCount > 0) return false;
+
         // Must be an inclined surface (not flat).
         if (collisionNormal.Z >= 1f) return false;
 
@@ -194,9 +199,11 @@ public sealed class InclineFix
             desiredVelocity.Y - state.LastBaseVelocity.Y,
             desiredVelocity.Z - state.LastBaseVelocity.Z);
         
-        // TODO: SourceMod gates this path on m_hMoveParent == -1. We don't have a confirmed
-        // CS2 equivalent here yet, so assume the pawn is unparented rather than use an
-        // incorrect approximation like GroundEntity.
+        // FIXME: SourceMod gates this path on m_hMoveParent == -1. In CS2 the scene node
+        // parent is used as the equivalent (SetParent input sets it in both engines), but
+        // this is unconfirmed — investigate if velocity bugs appear on moving platforms.
+        if (pawn.GetBodyComponent().GetSceneNode()?.GetParent() != null)
+            return;
 
         if (dontUseTeleport)
         {
