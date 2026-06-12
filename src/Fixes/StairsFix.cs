@@ -1,7 +1,6 @@
 using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Models;
 using InsanityGaming.RngFix.Services;
-using InsanityGaming.RngFix.Utils;
 using Microsoft.Extensions.Logging;
 using Sharp.Shared;
 using Sharp.Shared.Enums;
@@ -18,10 +17,6 @@ public sealed class StairsFix
     private readonly IEntityManager _entityManager;
     private readonly TriggerNatives _triggerNatives;
     private readonly ILogger<StairsFix> _logger;
-    private readonly HitRateLogger _downHitLogger;
-    private readonly HitRateLogger _upHitLogger;
-    private readonly HitRateLogger _overHitLogger;
-    private readonly HitRateLogger _finalDownHitLogger;
 
 
     public StairsFix(
@@ -37,10 +32,6 @@ public sealed class StairsFix
         _entityManager      = entityManager;
         _triggerNatives     = triggerNatives;
         _logger             = logger;
-        _downHitLogger      = new HitRateLogger("StairsFix.Down",      sharedSystem, logger, 0.075f);
-        _upHitLogger        = new HitRateLogger("StairsFix.Up",        sharedSystem, logger, 0.075f);
-        _overHitLogger      = new HitRateLogger("StairsFix.Over",      sharedSystem, logger, 0.075f);
-        _finalDownHitLogger = new HitRateLogger("StairsFix.FinalDown", sharedSystem, logger, 0.075f);
     }
 
     public bool TryApply(IPlayerPawn pawn, ModulePlayerState state)
@@ -84,7 +75,6 @@ public sealed class StairsFix
         if (!downTrace.DidHit()) return false;
         _logger.LogDebug("StairsFix down hit — InteractsAs={A} InteractsWith={W} Group={G}",
             downTrace.ShapeAttributes.InteractsAs, downTrace.ShapeAttributes.InteractsWith, downTrace.ShapeAttributes.CollisionGroup);
-        _downHitLogger.Record(pawn.Index, downTrace.ShapeAttributes.InteractsAs, downTrace.ShapeAttributes.InteractsWith, downTrace.ShapeAttributes.CollisionGroup);
         if (downTrace.PlaneNormal.Z < PhysicsConstants.MinStandableZNrm) return false;
 
         var groundBelowStep = downTrace.EndPosition;
@@ -141,7 +131,6 @@ public sealed class StairsFix
         {
             _logger.LogDebug("StairsFix up hit — InteractsAs={A} InteractsWith={W} Group={G}",
                 upTrace.ShapeAttributes.InteractsAs, upTrace.ShapeAttributes.InteractsWith, upTrace.ShapeAttributes.CollisionGroup);
-            _upHitLogger.Record(pawn.Index, upTrace.ShapeAttributes.InteractsAs, upTrace.ShapeAttributes.InteractsWith, upTrace.ShapeAttributes.CollisionGroup);
         }
         var afterUp = upTrace.DidHit() ? upTrace.EndPosition : stepTop;
 
@@ -157,7 +146,6 @@ public sealed class StairsFix
         {
             _logger.LogDebug("StairsFix over hit — InteractsAs={A} InteractsWith={W} Group={G}",
                 overTrace.ShapeAttributes.InteractsAs, overTrace.ShapeAttributes.InteractsWith, overTrace.ShapeAttributes.CollisionGroup);
-            _overHitLogger.Record(pawn.Index, overTrace.ShapeAttributes.InteractsAs, overTrace.ShapeAttributes.InteractsWith, overTrace.ShapeAttributes.CollisionGroup);
             return false;
         }
 
@@ -172,7 +160,6 @@ public sealed class StairsFix
         if (!finalDownTrace.DidHit()) return false;
         _logger.LogDebug("StairsFix finalDown hit — InteractsAs={A} InteractsWith={W} Group={G}",
             finalDownTrace.ShapeAttributes.InteractsAs, finalDownTrace.ShapeAttributes.InteractsWith, finalDownTrace.ShapeAttributes.CollisionGroup);
-        _finalDownHitLogger.Record(pawn.Index, finalDownTrace.ShapeAttributes.InteractsAs, finalDownTrace.ShapeAttributes.InteractsWith, finalDownTrace.ShapeAttributes.CollisionGroup);
         if (finalDownTrace.PlaneNormal.Z < PhysicsConstants.MinStandableZNrm) return false;
 
         var stepTopLanding = finalDownTrace.EndPosition;
