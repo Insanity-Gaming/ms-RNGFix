@@ -29,6 +29,7 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
     private readonly ILogger<RngFixModule> _logger;
 
     private IServiceProvider _serviceProvider = null!;
+    private RngFixConVars _conVars = null!;
     private IPlayerStateService _playerStateService = null!;
     private ITriggerTracker _triggerTracker = null!;
     private TriggerNatives _triggerNatives = null!;
@@ -87,6 +88,7 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
         services.AddSingleton<IRngModule>(sp => sp.GetRequiredService<PostThinkHandler>());
 
         _serviceProvider    = services.BuildServiceProvider();
+        _conVars            = _serviceProvider.GetRequiredService<RngFixConVars>();
         _playerStateService = _serviceProvider.GetRequiredService<IPlayerStateService>();
         _triggerTracker     = _serviceProvider.GetRequiredService<ITriggerTracker>();
         _triggerNatives     = _serviceProvider.GetRequiredService<TriggerNatives>();
@@ -192,24 +194,27 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
         int triggerIdx = entity.Index;
         bool isTeleportTrigger = _teleportTriggers.Contains(triggerIdx);
 
-        if (output.Equals("OnStartTouch", StringComparison.OrdinalIgnoreCase))
+        if (_conVars.IsTouchTrackingEnabled)
         {
-            _triggerTracker.SetTouching(playerIdx, triggerIdx, true);
-            if (isTeleportTrigger)
+            if (output.Equals("OnStartTouch", StringComparison.OrdinalIgnoreCase))
             {
-                var state = _playerStateService.Get(playerIdx);
-                if (state is not null) state.TouchingTeleportTriggerCount++;
+                _triggerTracker.SetTouching(playerIdx, triggerIdx, true);
+                if (isTeleportTrigger)
+                {
+                    var state = _playerStateService.Get(playerIdx);
+                    if (state is not null) state.TouchingTeleportTriggerCount++;
+                }
             }
-        }
-        else if (output.Equals("OnEndTouch", StringComparison.OrdinalIgnoreCase))
-        {
-            _triggerTracker.SetTouching(playerIdx, triggerIdx, false);
-            _serviceProvider.GetRequiredService<ITriggerTouchSynthesizer>().CleanupSyntheticTouch(entity, pawn);
-            if (isTeleportTrigger)
+            else if (output.Equals("OnEndTouch", StringComparison.OrdinalIgnoreCase))
             {
-                var state = _playerStateService.Get(playerIdx);
-                if (state is not null && state.TouchingTeleportTriggerCount > 0)
-                    state.TouchingTeleportTriggerCount--;
+                _triggerTracker.SetTouching(playerIdx, triggerIdx, false);
+                _serviceProvider.GetRequiredService<ITriggerTouchSynthesizer>().CleanupSyntheticTouch(entity, pawn);
+                if (isTeleportTrigger)
+                {
+                    var state = _playerStateService.Get(playerIdx);
+                    if (state is not null && state.TouchingTeleportTriggerCount > 0)
+                        state.TouchingTeleportTriggerCount--;
+                }
             }
         }
 

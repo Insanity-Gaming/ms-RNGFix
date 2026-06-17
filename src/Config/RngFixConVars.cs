@@ -14,6 +14,7 @@ public sealed class RngFixConVars
     private readonly IConVar _cvTelehop;
     private readonly IConVar _cvStairs;
     private readonly IConVar _cvOldSlopeFix;
+    private readonly IConVar _cvTouchTracking;
 
     // Engine ConVars
     private readonly IConVar? _cvMaxVelocity;
@@ -31,7 +32,8 @@ public sealed class RngFixConVars
         _cvTriggerJump = conVarManager.CreateConVar("rngfix_triggerjump",        1, "Enable trigger jump fix (0-1)",                ConVarFlags.Notify) ?? throw new InvalidOperationException("Failed to create rngfix_triggerjump");
         _cvTelehop     = conVarManager.CreateConVar("rngfix_telehop",            1, "Enable telehop fix (0-1)",                    ConVarFlags.Notify) ?? throw new InvalidOperationException("Failed to create rngfix_telehop");
         _cvStairs      = conVarManager.CreateConVar("rngfix_stairs",             1, "Enable stair slide fix (0-1)",                ConVarFlags.Notify) ?? throw new InvalidOperationException("Failed to create rngfix_stairs");
-        _cvOldSlopeFix = conVarManager.CreateConVar("rngfix_useoldslopefixlogic", 0, "Use old slope fix logic for compat (0-1)", ConVarFlags.Notify) ?? throw new InvalidOperationException("Failed to create rngfix_useoldslopefixlogic");
+        _cvOldSlopeFix    = conVarManager.CreateConVar("rngfix_useoldslopefixlogic", 0, "Use old slope fix logic for compat (0-1)", ConVarFlags.Notify) ?? throw new InvalidOperationException("Failed to create rngfix_useoldslopefixlogic");
+        _cvTouchTracking  = conVarManager.CreateConVar("rngfix_touch_tracking",      1, "Enable manual trigger touch tracking (0-1)", ConVarFlags.Notify) ?? throw new InvalidOperationException("Failed to create rngfix_touch_tracking");
 
         _cvMaxVelocity = conVarManager.FindConVar("sv_maxvelocity");
         _cvGravity = conVarManager.FindConVar("sv_gravity");
@@ -49,6 +51,7 @@ public sealed class RngFixConVars
     public bool IsTelehopEnabled => _cvTelehop.GetBool();
     public bool IsStairsEnabled => _cvStairs.GetBool();
     public bool UseOldSlopeFixLogic => _cvOldSlopeFix.GetBool();
+    public bool IsTouchTrackingEnabled => _cvTouchTracking.GetBool();
 
     // Engine ConVar accessors
     public float MaxVelocity => _cvMaxVelocity?.GetFloat() ?? 3500f;
