@@ -1,3 +1,4 @@
+using System.Buffers;
 using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Models;
 using InsanityGaming.RngFix.Services;
@@ -73,15 +74,25 @@ public sealed class TriggerJumpFix
         var hull = new TraceShapeHull { Mins = landingMins, Maxs = hullMaxs };
         var ray  = new TraceShapeRay(hull);
 
-        Span<uint> entityBuffer = stackalloc uint[128];
-
-        int count = _physicsQuery.EntitiesAlongRay(ray, landingPoint, in query, unique: true, entityBuffer);
+        const int MaxEntities = 512;
+        uint[] rentedBuffer = ArrayPool<uint>.Shared.Rent(MaxEntities);
+        int count;
+        try
+        {
+            count = _physicsQuery.EntitiesAlongRay(ray, landingPoint, in query, unique: true,
+                rentedBuffer.AsSpan(0, MaxEntities));
+        }
+        catch
+        {
+            ArrayPool<uint>.Shared.Return(rentedBuffer);
+            return false;
+        }
 
         bool didSomething = false;
 
         for (int i = 0; i < count; i++)
         {
-            int idx = (int)entityBuffer[i];
+            int idx = (int)rentedBuffer[i];
 
             if (idx <= 0)
                 continue;
@@ -126,6 +137,7 @@ public sealed class TriggerJumpFix
             didSomething = true;
         }
 
+        ArrayPool<uint>.Shared.Return(rentedBuffer);
         return didSomething;
     }
 }

@@ -20,7 +20,7 @@ namespace InsanityGaming.RngFix;
 /// Builds the internal DI container in <see cref="Init"/> and wires lifecycle via
 /// <see cref="IRngModule"/> iteration. Does not contain fix logic itself.
 /// </summary>
-public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityListener
+public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityListener, IGameListener
 {
     string IModSharpModule.DisplayName => "RngFix";
     string IModSharpModule.DisplayAuthor => "Retro";
@@ -34,6 +34,7 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
     private TriggerNatives _triggerNatives = null!;
     private readonly HashSet<int> _teleportTriggers = new();
     private readonly Dictionary<(int TriggerIdx, int PlayerIdx), int> _lastTeleportTouchTick = new();
+    private readonly HashSet<string> _hookedOutputClassnames = new();
 
     // ──────────────────────────────── Constructor ────────────────────────────────
 
@@ -93,6 +94,7 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
         // ── Install listeners ──
         _sharedSystem.GetClientManager().InstallClientListener(this);
         _sharedSystem.GetEntityManager().InstallEntityListener(this);
+        _sharedSystem.GetModSharp().InstallGameListener(this);
         _sharedSystem.GetModSharp().InstallGameFrameHook(null, OnGameFramePost);
         // ── Initialize sub-modules ──
         foreach (IRngModule service in _serviceProvider.GetServices<IRngModule>())
@@ -112,6 +114,7 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
 
         _sharedSystem.GetClientManager().RemoveClientListener(this);
         _sharedSystem.GetEntityManager().RemoveEntityListener(this);
+        _sharedSystem.GetModSharp().RemoveGameListener(this);
         _logger.LogInformation("RngFix shut down.");
     }
 
@@ -133,6 +136,12 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
         {
             _serviceProvider.GetRequiredService<ITriggerTouchSynthesizer>().CleanupPlayer(idx);
             _playerStateService.Remove(idx);
+
+            var keysToRemove = _lastTeleportTouchTick.Keys
+                .Where(k => k.PlayerIdx == idx)
+                .ToList();
+            foreach (var key in keysToRemove)
+                _lastTeleportTouchTick.Remove(key);
         }
     }
 
@@ -145,8 +154,11 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
     {
         if (!entity.Classname.StartsWith("trigger_", StringComparison.OrdinalIgnoreCase)) return;
 
-        _sharedSystem.GetEntityManager().HookEntityOutput(entity.Classname, "OnStartTouch");
-        _sharedSystem.GetEntityManager().HookEntityOutput(entity.Classname, "OnEndTouch");
+        if (_hookedOutputClassnames.Add(entity.Classname))
+        {
+            _sharedSystem.GetEntityManager().HookEntityOutput(entity.Classname, "OnStartTouch");
+            _sharedSystem.GetEntityManager().HookEntityOutput(entity.Classname, "OnEndTouch");
+        }
 
         if (entity.Classname.Equals("trigger_teleport", StringComparison.OrdinalIgnoreCase))
             _teleportTriggers.Add(entity.Index);
@@ -154,8 +166,15 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
 
     public void OnEntityDeleted(IBaseEntity entity)
     {
-        _teleportTriggers.Remove(entity.Index);
-        _serviceProvider.GetRequiredService<ITriggerTouchSynthesizer>().CleanupTrigger(entity.Index);
+        int entityIdx = entity.Index;
+        _teleportTriggers.Remove(entityIdx);
+        _serviceProvider.GetRequiredService<ITriggerTouchSynthesizer>().CleanupTrigger(entityIdx);
+
+        var keysToRemove = _lastTeleportTouchTick.Keys
+            .Where(k => k.TriggerIdx == entityIdx)
+            .ToList();
+        foreach (var key in keysToRemove)
+            _lastTeleportTouchTick.Remove(key);
     }
 
     public EHookAction OnEntityFireOutput(IBaseEntity entity, string output, IBaseEntity? activator, float delay)
@@ -196,6 +215,36 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
 
         return EHookAction.Ignored;
     }
+
+    // ──────────────────────────────── IGameListener ────────────────────────────────
+
+    int IGameListener.ListenerVersion  => IGameListener.ApiVersion;
+    int IGameListener.ListenerPriority => 0;
+
+    public void OnGameDeactivate()
+    {
+        // Hooks registered via HookEntityOutput are cleared by the engine on map change.
+        // Reset the guard so they get re-registered when the next map's entities spawn.
+        _hookedOutputClassnames.Clear();
+
+        // Safety-net: flush any entries that OnEntityDeleted/OnClientDisconnected missed
+        // (e.g. if the engine tears entities/clients down without firing those callbacks).
+        _lastTeleportTouchTick.Clear();
+        _teleportTriggers.Clear();
+    }
+
+    public void OnServerInit()       { }
+    public void OnServerSpawn()      { }
+    public void OnServerActivate()   { }
+    public void OnResourcePrecache() { }
+    public void OnGameInit()         { }
+    public void OnGamePostInit()     { }
+    public void OnGameActivate()     { }
+    public void OnGamePreShutdown()  { }
+    public void OnGameShutdown()     { }
+    public void OnRoundRestart()     { }
+    public void OnRoundRestarted()   { }
+    public ECommandAction ConsoleSay(string message) => ECommandAction.Skipped;
 
     // ──────────────────────────────── Helpers ────────────────────────────────
 
