@@ -1,24 +1,51 @@
 using Sharp.Shared.GameEntities;
-using Sharp.Shared.Managers;
 
 namespace InsanityGaming.RngFix.Services;
 
-public sealed unsafe class TriggerTouchSynthesizer : ITriggerTouchSynthesizer
+/// <summary>
+/// Fires the engine's real CBaseEntity::Touch for a trigger a player's movement should have
+/// touched but the engine's own collision pass skipped this tick.
+///
+/// This intentionally does NOT synthesize engine-side touch-list membership (no raw writes into
+/// CBaseTrigger::m_hTouchingEntities). That approach previously required an unchecked
+/// As&lt;IBaseTrigger&gt;() cast on entity indices resolved after map changes/disconnects, which — once
+/// those indices went stale — wrote through a trigger-shaped schema offset into an entity that was
+/// no longer a trigger. That is the confirmed source of the ~17h uptime crash. See
+/// TryApply in TriggerJumpFix and the removed synthesizer history for context.
+///
+/// Trade-off accepted: a synthesized touch fires the trigger once via its own Touch() logic, but
+/// is not tracked as an ongoing engine-side touch. Continuous/repeating triggers will not keep
+/// re-firing from a synthesized entry, and the engine will not produce an OnEndTouch for it.
+/// </summary>
+public sealed class TriggerTouchSynthesizer : ITriggerTouchSynthesizer
 {
-    private readonly IEntityManager _entityManager;
     private readonly ITriggerTracker _triggerTracker;
     private readonly TriggerNatives _triggerNatives;
-    private readonly HashSet<(int PlayerIdx, int TriggerIdx)> _syntheticTouches = new();
 
-    public TriggerTouchSynthesizer(IEntityManager entityManager, ITriggerTracker triggerTracker, TriggerNatives triggerNatives)
+    public TriggerTouchSynthesizer(ITriggerTracker triggerTracker, TriggerNatives triggerNatives)
     {
-        _entityManager = entityManager;
         _triggerTracker = triggerTracker;
         _triggerNatives = triggerNatives;
     }
 
+    /// <remarks>
+    /// Callers must have already verified <paramref name="triggerEntity"/>'s classname starts with
+    /// "trigger_" this same tick (see TriggerJumpFix.TryApply) — the As&lt;IBaseTrigger&gt;() cast below
+    /// is unchecked and only safe against an entity resolved fresh, not a cached/stale index.
+    /// </remarks>
     public void EnsureTouchAfterManualTrigger(IBaseEntity triggerEntity, IPlayerPawn pawn)
     {
+        if (!triggerEntity.IsValid())
+            return;
+
+        string classname;
+        try { classname = triggerEntity.Classname; }
+        catch { return; }
+
+        if (string.IsNullOrEmpty(classname) ||
+            !classname.StartsWith("trigger_", StringComparison.OrdinalIgnoreCase))
+            return;
+
         var trigger = triggerEntity.As<IBaseTrigger>();
         if (!trigger.IsValid())
             return;
@@ -30,98 +57,5 @@ public sealed unsafe class TriggerTouchSynthesizer : ITriggerTouchSynthesizer
             return;
 
         _triggerNatives.Touch(triggerEntity, pawn);
-
-        if (!TriggerTouchingContains(trigger, playerIdx))
-            AddSyntheticTouch(trigger, pawn);
-
-        _triggerTracker.SetTouching(playerIdx, triggerIdx, true);
-    }
-
-    public void CleanupSyntheticTouch(IBaseEntity triggerEntity, IPlayerPawn pawn)
-    {
-        var trigger = triggerEntity.As<IBaseTrigger>();
-        if (!trigger.IsValid())
-            return;
-
-        CleanupSyntheticTouch(trigger, pawn.Index);
-    }
-
-    public void CleanupPlayer(int playerIdx)
-    {
-        var touchesToCleanup = _syntheticTouches
-            .Where(entry => entry.PlayerIdx == playerIdx)
-            .ToArray();
-
-        foreach (var entry in touchesToCleanup)
-        {
-            IBaseEntity? triggerEntity;
-
-            try
-            {
-                triggerEntity = _entityManager.FindEntityByIndex(entry.TriggerIdx);
-            }
-            catch
-            {
-                triggerEntity = null;
-            }
-
-            if (triggerEntity?.As<IBaseTrigger>() is { } trigger && trigger.IsValid())
-                RemoveSyntheticTouch(trigger, playerIdx);
-
-            _syntheticTouches.Remove(entry);
-        }
-    }
-
-    public void CleanupTrigger(int triggerIdx)
-    {
-        _syntheticTouches.RemoveWhere(entry => entry.TriggerIdx == triggerIdx);
-    }
-
-    private void CleanupSyntheticTouch(IBaseTrigger trigger, int playerIdx)
-    {
-        if (!_syntheticTouches.Remove((playerIdx, trigger.Index)))
-            return;
-
-        RemoveSyntheticTouch(trigger, playerIdx);
-    }
-
-    private bool TriggerTouchingContains(IBaseTrigger trigger, int playerIdx)
-    {
-        var touching = trigger.GetTouchingEntities().GetUtlVector();
-
-        for (int i = 0; i < touching->Count; i++)
-        {
-            var handle = touching->Element(i);
-            if (handle.GetEntryIndex() == playerIdx)
-                return true;
-        }
-
-        return false;
-    }
-
-    private void AddSyntheticTouch(IBaseTrigger trigger, IPlayerPawn pawn)
-    {
-        var touching = trigger.GetTouchingEntities().GetUtlVector();
-
-        if (TriggerTouchingContains(trigger, pawn.Index))
-            return;
-
-        touching->Add(pawn.Handle);
-        _syntheticTouches.Add((pawn.Index, trigger.Index));
-    }
-
-    private void RemoveSyntheticTouch(IBaseTrigger trigger, int playerIdx)
-    {
-        var touching = trigger.GetTouchingEntities().GetUtlVector();
-
-        for (int i = 0; i < touching->Count; i++)
-        {
-            var handle = touching->Element(i);
-            if (handle.GetEntryIndex() != playerIdx)
-                continue;
-
-            touching->Remove(i);
-            break;
-        }
     }
 }

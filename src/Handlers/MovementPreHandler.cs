@@ -2,7 +2,6 @@ using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Fixes;
 using InsanityGaming.RngFix.Models;
 using InsanityGaming.RngFix.Services;
-using Microsoft.Extensions.Logging;
 using Sharp.Shared;
 using Sharp.Shared.Enums;
 using Sharp.Shared.GameEntities;
@@ -26,7 +25,6 @@ public sealed class MovementPreHandler : IRngModule
     private readonly RngFixConVars _conVars;
     private readonly EdgeBugFix _edgeBugFix;
     private readonly InclineFix _inclineFix;
-    private readonly ILogger<MovementPreHandler> _logger;
 
 
     public MovementPreHandler(
@@ -36,8 +34,7 @@ public sealed class MovementPreHandler : IRngModule
         IPhysicsQueryManager physicsQuery,
         RngFixConVars conVars,
         EdgeBugFix edgeBugFix,
-        InclineFix inclineFix,
-        ILogger<MovementPreHandler> logger)
+        InclineFix inclineFix)
     {
         _sharedSystem       = sharedSystem;
         _playerState        = playerState;
@@ -46,7 +43,6 @@ public sealed class MovementPreHandler : IRngModule
         _conVars            = conVars;
         _edgeBugFix         = edgeBugFix;
         _inclineFix         = inclineFix;
-        _logger             = logger;
     }
 
     public bool Init()
@@ -56,7 +52,11 @@ public sealed class MovementPreHandler : IRngModule
         return true;
     }
 
-    public void Shutdown() { }
+    public void Shutdown()
+    {
+        _sharedSystem.GetHookManager().PlayerProcessMovePre.RemoveForward(OnProcessMovementPre);
+        _sharedSystem.GetHookManager().PlayerProcessMovePost.RemoveForward(OnProcessMovementPost);
+    }
 
     /// <summary>
     /// Called by the PlayerProcessMovePre hook. Entry point for all pre-tick logic.
@@ -66,6 +66,10 @@ public sealed class MovementPreHandler : IRngModule
         // Get the player pawn from the hook params.
         var pawn = obj.Pawn;
         var controller = obj.Controller;
+
+        // pawn.Index is documented as unreliable without a prior validity check.
+        if (pawn is null || !pawn.IsValid())
+            return;
 
         int entityIndex = pawn.Index;
         var state = _playerState.GetOrCreate(entityIndex);
@@ -172,10 +176,6 @@ public sealed class MovementPreHandler : IRngModule
 
         if (!trace.DidHit()) return;
 
-        _logger.LogDebug("MovementPre collision hit — InteractsAs={A} InteractsWith={W} Group={G}",
-            trace.ShapeAttributes.InteractsAs,
-            trace.ShapeAttributes.InteractsWith,
-            trace.ShapeAttributes.CollisionGroup);
         var nrm            = trace.PlaneNormal;
         var collisionPoint = trace.EndPosition;
 

@@ -4,6 +4,11 @@ using Sharp.Shared.Objects;
 
 namespace InsanityGaming.RngFix.Config;
 
+/// <summary>
+/// Wraps all rngfix_* and consumed engine ConVars. Values are cached in fields and refreshed
+/// via <see cref="IConVarManager.InstallChangeHook"/> rather than read from native storage on
+/// every access — several of these accessors are called per player, per tick.
+/// </summary>
 public sealed class RngFixConVars
 {
     // Plugin ConVars
@@ -24,6 +29,23 @@ public sealed class RngFixConVars
     private readonly IConVar? _cvJumpImpulse;
     private readonly IConVar? _cvAutoBunnyHopping;
 
+    // Cached values — seeded from native storage once, then kept fresh via change hooks below.
+    private bool _isDownhillEnabled;
+    private int  _uphillMode;
+    private bool _isEdgeEnabled;
+    private bool _isTriggerJumpEnabled;
+    private bool _isTelehopEnabled;
+    private bool _isStairsEnabled;
+    private bool _useOldSlopeFixLogic;
+    private bool _isTouchTrackingEnabled;
+
+    private float  _maxVelocity   = 3500f;
+    private float  _gravity       = 800f;
+    private float  _airAccelerate = 10f;
+    private float? _timeBetweenDucks;
+    private float? _jumpImpulse;
+    private bool   _autoBunnyHopping;
+
     public RngFixConVars(IConVarManager conVarManager)
     {
         _cvDownhill    = conVarManager.CreateConVar("rngfix_downhill",           1, "Enable downhill incline fix (0-1)",           ConVarFlags.Notify) ?? throw new InvalidOperationException("Failed to create rngfix_downhill");
@@ -41,26 +63,82 @@ public sealed class RngFixConVars
         _cvTimeBetweenDucks = conVarManager.FindConVar("sv_timebetweenducks");
         _cvJumpImpulse = conVarManager.FindConVar("sv_jump_impulse");
         _cvAutoBunnyHopping = conVarManager.FindConVar("sv_autobunnyhopping");
+
+        // Seed the cache, then wire change hooks so the fields track live edits without
+        // requiring a native read on every access.
+        _isDownhillEnabled      = _cvDownhill.GetBool();
+        _uphillMode             = _cvUphill.GetInt32();
+        _isEdgeEnabled          = _cvEdge.GetBool();
+        _isTriggerJumpEnabled   = _cvTriggerJump.GetBool();
+        _isTelehopEnabled       = _cvTelehop.GetBool();
+        _isStairsEnabled        = _cvStairs.GetBool();
+        _useOldSlopeFixLogic    = _cvOldSlopeFix.GetBool();
+        _isTouchTrackingEnabled = _cvTouchTracking.GetBool();
+
+        conVarManager.InstallChangeHook(_cvDownhill,      cv => _isDownhillEnabled      = cv.GetBool());
+        conVarManager.InstallChangeHook(_cvUphill,        cv => _uphillMode             = cv.GetInt32());
+        conVarManager.InstallChangeHook(_cvEdge,          cv => _isEdgeEnabled          = cv.GetBool());
+        conVarManager.InstallChangeHook(_cvTriggerJump,   cv => _isTriggerJumpEnabled   = cv.GetBool());
+        conVarManager.InstallChangeHook(_cvTelehop,       cv => _isTelehopEnabled       = cv.GetBool());
+        conVarManager.InstallChangeHook(_cvStairs,        cv => _isStairsEnabled        = cv.GetBool());
+        conVarManager.InstallChangeHook(_cvOldSlopeFix,   cv => _useOldSlopeFixLogic    = cv.GetBool());
+        conVarManager.InstallChangeHook(_cvTouchTracking, cv => _isTouchTrackingEnabled = cv.GetBool());
+
+        if (_cvMaxVelocity is not null)
+        {
+            _maxVelocity = _cvMaxVelocity.GetFloat();
+            conVarManager.InstallChangeHook(_cvMaxVelocity, cv => _maxVelocity = cv.GetFloat());
+        }
+
+        if (_cvGravity is not null)
+        {
+            _gravity = _cvGravity.GetFloat();
+            conVarManager.InstallChangeHook(_cvGravity, cv => _gravity = cv.GetFloat());
+        }
+
+        if (_cvAirAccelerate is not null)
+        {
+            _airAccelerate = _cvAirAccelerate.GetFloat();
+            conVarManager.InstallChangeHook(_cvAirAccelerate, cv => _airAccelerate = cv.GetFloat());
+        }
+
+        if (_cvTimeBetweenDucks is not null)
+        {
+            _timeBetweenDucks = _cvTimeBetweenDucks.GetFloat();
+            conVarManager.InstallChangeHook(_cvTimeBetweenDucks, cv => _timeBetweenDucks = cv.GetFloat());
+        }
+
+        if (_cvJumpImpulse is not null)
+        {
+            _jumpImpulse = _cvJumpImpulse.GetFloat();
+            conVarManager.InstallChangeHook(_cvJumpImpulse, cv => _jumpImpulse = cv.GetFloat());
+        }
+
+        if (_cvAutoBunnyHopping is not null)
+        {
+            _autoBunnyHopping = _cvAutoBunnyHopping.GetBool();
+            conVarManager.InstallChangeHook(_cvAutoBunnyHopping, cv => _autoBunnyHopping = cv.GetBool());
+        }
     }
 
-    // Plugin ConVar accessors
-    public bool IsDownhillEnabled => _cvDownhill.GetBool();
-    public int UphillMode => _cvUphill.GetInt32();
-    public bool IsEdgeEnabled => _cvEdge.GetBool();
-    public bool IsTriggerJumpEnabled => _cvTriggerJump.GetBool();
-    public bool IsTelehopEnabled => _cvTelehop.GetBool();
-    public bool IsStairsEnabled => _cvStairs.GetBool();
-    public bool UseOldSlopeFixLogic => _cvOldSlopeFix.GetBool();
-    public bool IsTouchTrackingEnabled => _cvTouchTracking.GetBool();
+    // Plugin ConVar accessors — cached, refreshed via change hook.
+    public bool IsDownhillEnabled => _isDownhillEnabled;
+    public int UphillMode => _uphillMode;
+    public bool IsEdgeEnabled => _isEdgeEnabled;
+    public bool IsTriggerJumpEnabled => _isTriggerJumpEnabled;
+    public bool IsTelehopEnabled => _isTelehopEnabled;
+    public bool IsStairsEnabled => _isStairsEnabled;
+    public bool UseOldSlopeFixLogic => _useOldSlopeFixLogic;
+    public bool IsTouchTrackingEnabled => _isTouchTrackingEnabled;
 
-    // Engine ConVar accessors
-    public float MaxVelocity => _cvMaxVelocity?.GetFloat() ?? 3500f;
-    public float Gravity => _cvGravity?.GetFloat() ?? 800f;
-    public float AirAccelerate => _cvAirAccelerate?.GetFloat() ?? 10f;
-    public float? TimeBetweenDucks => _cvTimeBetweenDucks?.GetFloat();
-    public float? JumpImpulse => _cvJumpImpulse?.GetFloat();
-    public bool AutoBunnyHopping => _cvAutoBunnyHopping?.GetBool() ?? false;
+    // Engine ConVar accessors — cached, refreshed via change hook.
+    public float MaxVelocity => _maxVelocity;
+    public float Gravity => _gravity;
+    public float AirAccelerate => _airAccelerate;
+    public float? TimeBetweenDucks => _timeBetweenDucks;
+    public float? JumpImpulse => _jumpImpulse;
+    public bool AutoBunnyHopping => _autoBunnyHopping;
 
     // Aggregate
-    public bool AnyPreTickFixEnabled => IsDownhillEnabled || UphillMode != 0 || IsEdgeEnabled || IsStairsEnabled || IsTelehopEnabled;
+    public bool AnyPreTickFixEnabled => _isDownhillEnabled || _uphillMode != 0 || _isEdgeEnabled || _isStairsEnabled || _isTelehopEnabled;
 }

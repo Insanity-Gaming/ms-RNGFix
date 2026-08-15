@@ -11,6 +11,7 @@ using Sharp.Shared.Enums;
 using Sharp.Shared.GameEntities;
 using Sharp.Shared.HookParams;
 using Sharp.Shared.Listeners;
+using Sharp.Shared.Managers;
 using Sharp.Shared.Objects;
 
 namespace InsanityGaming.RngFix;
@@ -33,8 +34,18 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
     private IPlayerStateService _playerStateService = null!;
     private ITriggerTracker _triggerTracker = null!;
     private TriggerNatives _triggerNatives = null!;
-    private readonly HashSet<int> _teleportTriggers = new();
-    private readonly Dictionary<(int TriggerIdx, int PlayerIdx), int> _lastTeleportTouchTick = new();
+    private IEntityManager _entityManager = null!;
+
+    // Dense list for cheap, re-entrancy-safe iteration every frame (indexed for-loop, not
+    // foreach — a foreach over a mutated collection throws; an indexed loop that re-checks
+    // Count each iteration just processes fewer/more elements, never crashes).
+    private readonly List<int> _teleportTriggerIndices = new();
+    // Parallel set for O(1) "is this a teleport trigger" checks (OnEntityFireOutput).
+    private readonly HashSet<int> _teleportTriggerSet = new();
+    // Cached m_target validity per trigger index — resolved lazily (and at most once it comes
+    // back true) instead of via FindEntityByName every frame. See HasValidTeleportTarget.
+    private readonly Dictionary<int, bool> _teleportTargetValid = new();
+
     private readonly HashSet<string> _hookedOutputClassnames = new();
 
     // ──────────────────────────────── Constructor ────────────────────────────────
@@ -92,6 +103,7 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
         _playerStateService = _serviceProvider.GetRequiredService<IPlayerStateService>();
         _triggerTracker     = _serviceProvider.GetRequiredService<ITriggerTracker>();
         _triggerNatives     = _serviceProvider.GetRequiredService<TriggerNatives>();
+        _entityManager      = _serviceProvider.GetRequiredService<IEntityManager>();
 
         // ── Install listeners ──
         _sharedSystem.GetClientManager().InstallClientListener(this);
@@ -117,6 +129,11 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
         _sharedSystem.GetClientManager().RemoveClientListener(this);
         _sharedSystem.GetEntityManager().RemoveEntityListener(this);
         _sharedSystem.GetModSharp().RemoveGameListener(this);
+        _sharedSystem.GetModSharp().RemoveGameFrameHook(null, OnGameFramePost);
+
+        if (_serviceProvider is IDisposable disposableProvider)
+            disposableProvider.Dispose();
+
         _logger.LogInformation("RngFix shut down.");
     }
 
@@ -135,16 +152,7 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
     {
         int idx = GetPlayerIndex(client);
         if (idx != -1)
-        {
-            _serviceProvider.GetRequiredService<ITriggerTouchSynthesizer>().CleanupPlayer(idx);
             _playerStateService.Remove(idx);
-
-            var keysToRemove = _lastTeleportTouchTick.Keys
-                .Where(k => k.PlayerIdx == idx)
-                .ToList();
-            foreach (var key in keysToRemove)
-                _lastTeleportTouchTick.Remove(key);
-        }
     }
 
     // ──────────────────────────────── IEntityListener ────────────────────────────────
@@ -154,6 +162,10 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
 
     public void OnEntityCreated(IBaseEntity entity)
     {
+        // Classname must not be read before validity is confirmed — see IBaseEntity.Classname docs.
+        if (!entity.IsValid())
+            return;
+
         if (!entity.Classname.StartsWith("trigger_", StringComparison.OrdinalIgnoreCase)) return;
 
         if (_hookedOutputClassnames.Add(entity.Classname))
@@ -163,36 +175,39 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
         }
 
         if (entity.Classname.Equals("trigger_teleport", StringComparison.OrdinalIgnoreCase))
-            _teleportTriggers.Add(entity.Index);
+        {
+            if (_teleportTriggerSet.Add(entity.Index))
+                _teleportTriggerIndices.Add(entity.Index);
+        }
     }
 
     public void OnEntityDeleted(IBaseEntity entity)
     {
         int entityIdx = entity.Index;
-        _teleportTriggers.Remove(entityIdx);
-        _serviceProvider.GetRequiredService<ITriggerTouchSynthesizer>().CleanupTrigger(entityIdx);
 
-        var keysToRemove = _lastTeleportTouchTick.Keys
-            .Where(k => k.TriggerIdx == entityIdx)
-            .ToList();
-        foreach (var key in keysToRemove)
-            _lastTeleportTouchTick.Remove(key);
+        if (_teleportTriggerSet.Remove(entityIdx))
+            _teleportTriggerIndices.Remove(entityIdx);
+        _teleportTargetValid.Remove(entityIdx);
     }
 
     public EHookAction OnEntityFireOutput(IBaseEntity entity, string output, IBaseEntity? activator, float delay)
     {
+        // Classname must not be read before validity is confirmed — see IBaseEntity.Classname docs.
+        if (!entity.IsValid())
+            return EHookAction.Ignored;
+
         if (!entity.Classname.StartsWith("trigger_", StringComparison.OrdinalIgnoreCase))
             return EHookAction.Ignored;
 
         if (activator?.AsPlayerPawn() is not { } pawn)
             return EHookAction.Ignored;
-        
+
         var trigger = entity.As<IBaseTrigger>();
         if (!trigger.IsValid()) return EHookAction.Ignored;
 
         int playerIdx  = pawn.Index;
         int triggerIdx = entity.Index;
-        bool isTeleportTrigger = _teleportTriggers.Contains(triggerIdx);
+        bool isTeleportTrigger = _teleportTriggerSet.Contains(triggerIdx);
 
         if (_conVars.IsTouchTrackingEnabled)
         {
@@ -208,7 +223,6 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
             else if (output.Equals("OnEndTouch", StringComparison.OrdinalIgnoreCase))
             {
                 _triggerTracker.SetTouching(playerIdx, triggerIdx, false);
-                _serviceProvider.GetRequiredService<ITriggerTouchSynthesizer>().CleanupSyntheticTouch(entity, pawn);
                 if (isTeleportTrigger)
                 {
                     var state = _playerStateService.Get(playerIdx);
@@ -228,14 +242,21 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
 
     public void OnGameDeactivate()
     {
-        // Hooks registered via HookEntityOutput are cleared by the engine on map change.
-        // Reset the guard so they get re-registered when the next map's entities spawn.
-        _hookedOutputClassnames.Clear();
+        // Hooks registered via HookEntityOutput have no unhook API (IEntityManager exposes
+        // HookEntityOutput/HookEntityInput only) — treat a registration as permanent and never
+        // clear this guard, otherwise every map change re-registers the same (classname, output)
+        // pair, and each duplicate registration fires the handler again per touch.
+        // (Guard intentionally NOT cleared here.)
 
-        // Safety-net: flush any entries that OnEntityDeleted/OnClientDisconnected missed
-        // (e.g. if the engine tears entities/clients down without firing those callbacks).
-        _lastTeleportTouchTick.Clear();
-        _teleportTriggers.Clear();
+        // Teleport-trigger tracking is per-map — indices are reused by the next map's entities.
+        _teleportTriggerIndices.Clear();
+        _teleportTriggerSet.Clear();
+        _teleportTargetValid.Clear();
+
+        // Player state is keyed by pawn entity index, which the next map's entities reuse.
+        // Without this, a fresh player could silently inherit a previous occupant's state
+        // (e.g. a stuck TouchingTeleportTriggerCount permanently disabling EdgeBugFix/InclineFix).
+        _playerStateService.Clear();
     }
 
     public void OnServerInit()       { }
@@ -255,18 +276,19 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
 
     private unsafe void OnGameFramePost(bool b, bool b1, bool arg3)
     {
-        if (_teleportTriggers.Count == 0)
-            return;
-
-        List<int>? invalidTriggers = null;
-
-        foreach (int triggerIdx in _teleportTriggers)
+        // Indexed for-loop, not foreach: Count is re-checked every iteration, so a re-entrant
+        // add/remove triggered from PassesTriggerFilters (below) during this loop just changes
+        // how many entries get processed this frame — it can never throw or read past the end,
+        // unlike foreach's enumerator, which throws on any collection mutation mid-iteration.
+        for (int t = 0; t < _teleportTriggerIndices.Count; t++)
         {
+            int triggerIdx = _teleportTriggerIndices[t];
+
             IBaseEntity? entity;
 
             try
             {
-                entity = _sharedSystem.GetEntityManager().FindEntityByIndex(triggerIdx);
+                entity = _entityManager.FindEntityByIndex(triggerIdx);
             }
             catch
             {
@@ -276,19 +298,35 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
             if (entity is null || !entity.IsValid() ||
                 !entity.Classname.Equals("trigger_teleport", StringComparison.OrdinalIgnoreCase))
             {
-                invalidTriggers ??= new List<int>();
-                invalidTriggers.Add(triggerIdx);
+                if (_teleportTriggerSet.Remove(triggerIdx))
+                    _teleportTriggerIndices.RemoveAt(t--);
+                _teleportTargetValid.Remove(triggerIdx);
                 continue;
             }
 
             var trigger = entity.As<IBaseTrigger>();
-            if (!trigger.IsValid() || !HasValidTeleportTarget(trigger))
-                continue;
+            if (!trigger.IsValid()) continue;
 
             var touching = trigger.GetTouchingEntities().GetUtlVector();
-            int count = touching->Count;
 
-            for (int i = 0; i < count; i++)
+            // Nobody touching this trigger — skip the (cached, but still a dictionary hit)
+            // target-validity check entirely. Cheapest possible path for the common case.
+            if (touching->Count == 0)
+                continue;
+
+            if (!_teleportTargetValid.TryGetValue(triggerIdx, out bool targetValid) || !targetValid)
+            {
+                // Resolved once and cached permanently once true. If still false (e.g. the
+                // trigger's target hasn't spawned yet), this re-checks every frame until it
+                // resolves — same cost as before caching, but only while unresolved.
+                targetValid = HasValidTeleportTarget(trigger);
+                _teleportTargetValid[triggerIdx] = targetValid;
+                if (!targetValid) continue;
+            }
+
+            // Re-read Count every iteration: PassesTriggerFilters below is a real native vcall
+            // that can run entity I/O and mutate this same touch list mid-loop.
+            for (int i = 0; i < touching->Count; i++)
             {
                 var handle = touching->Element(i);
                 var entityIndex = handle.GetEntryIndex();
@@ -298,7 +336,7 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
                 IBaseEntity? other;
                 try
                 {
-                    other = _sharedSystem.GetEntityManager().FindEntityByIndex(entityIndex);
+                    other = _entityManager.FindEntityByIndex(entityIndex);
                 }
                 catch
                 {
@@ -312,14 +350,14 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
                 if (state is null)
                     continue;
 
-                var key = (triggerIdx, pawn.Index);
-                if (_lastTeleportTouchTick.TryGetValue(key, out int lastTick) && lastTick == state.Tick)
+                // Per-player-per-tick dedupe: this loop runs every frame, and multiple frames
+                // can occur within a single game tick, so skip re-processing this player once
+                // they've already been marked teleported this tick (by this trigger or another).
+                if (state.LastMapTeleportTick == state.Tick)
                     continue;
 
                 if (!_triggerNatives.PassesTriggerFilters(entity, pawn))
                     continue;
-
-                _lastTeleportTouchTick[key] = state.Tick;
 
                 if (state.LastMapTeleportTick == state.Tick - 1)
                     state.MapTeleportedSequentialTicks = true;
@@ -327,12 +365,6 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
                 state.LastMapTeleportTick = state.Tick;
             }
         }
-
-        if (invalidTriggers is null)
-            return;
-
-        foreach (int triggerIdx in invalidTriggers)
-            _teleportTriggers.Remove(triggerIdx);
     }
 
     private bool HasValidTeleportTarget(IBaseTrigger trigger)
@@ -349,7 +381,7 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
         if (targetName[0] == '!')
             return true;
 
-        var entity =  _sharedSystem.GetEntityManager().FindEntityByName(null, targetName);
+        var entity = _entityManager.FindEntityByName(null, targetName);
         if (entity is null || !entity.IsValid())
             return false;
 
@@ -360,6 +392,11 @@ public sealed class RngFixModule : IModSharpModule, IClientListener, IEntityList
         return false;
     }
 
-    private static int GetPlayerIndex(IGameClient client)
-        => client.GetPlayerController()?.GetPlayerPawn()?.Index ?? -1;
+    /// <summary>
+    /// Resolves the client's current pawn entity index via its stable engine slot, rather than
+    /// walking Controller -> Pawn (which returns null once either has already been torn down,
+    /// e.g. at disconnect) — this lets disconnect-time cleanup run even when the pawn is gone.
+    /// </summary>
+    private int GetPlayerIndex(IGameClient client)
+        => _entityManager.FindPlayerPawnBySlot(client.Slot)?.Index ?? -1;
 }

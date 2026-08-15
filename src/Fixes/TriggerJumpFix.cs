@@ -2,7 +2,6 @@ using System.Buffers;
 using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Models;
 using InsanityGaming.RngFix.Services;
-using Microsoft.Extensions.Logging;
 using Sharp.Shared.Enums;
 using Sharp.Shared.GameEntities;
 using Sharp.Shared.Managers;
@@ -23,22 +22,19 @@ public sealed class TriggerJumpFix
     private readonly IEntityManager _entityManager;
     private readonly ITriggerTracker _triggerTracker;
     private readonly ITriggerTouchSynthesizer _triggerTouchSynthesizer;
-    private readonly ILogger<TriggerJumpFix> _logger;
 
     public TriggerJumpFix(
         RngFixConVars conVars,
         IPhysicsQueryManager physicsQuery,
         IEntityManager entityManager,
         ITriggerTracker triggerTracker,
-        ITriggerTouchSynthesizer triggerTouchSynthesizer,
-        ILogger<TriggerJumpFix> logger)
+        ITriggerTouchSynthesizer triggerTouchSynthesizer)
     {
         _conVars                 = conVars;
         _physicsQuery            = physicsQuery;
         _entityManager           = entityManager;
         _triggerTracker          = triggerTracker;
         _triggerTouchSynthesizer = triggerTouchSynthesizer;
-        _logger                  = logger;
     }
 
     /// <summary>
@@ -76,68 +72,74 @@ public sealed class TriggerJumpFix
 
         const int MaxEntities = 512;
         uint[] rentedBuffer = ArrayPool<uint>.Shared.Rent(MaxEntities);
-        int count;
+
         try
         {
-            count = _physicsQuery.EntitiesAlongRay(ray, landingPoint, in query, unique: true,
-                rentedBuffer.AsSpan(0, MaxEntities));
+            int count;
+            try
+            {
+                count = _physicsQuery.EntitiesAlongRay(ray, landingPoint, in query, unique: true,
+                    rentedBuffer.AsSpan(0, MaxEntities));
+            }
+            catch
+            {
+                return false;
+            }
+
+            int entityCount = Math.Min(count, MaxEntities);
+            bool didSomething = false;
+
+            for (int i = 0; i < entityCount; i++)
+            {
+                int idx = (int)rentedBuffer[i];
+
+                if (idx <= 0)
+                    continue;
+
+                IBaseEntity? entity;
+
+                try
+                {
+                    entity = _entityManager.FindEntityByIndex(idx);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (entity is null || !entity.IsValid())
+                    continue;
+
+                string? classname;
+                try
+                {
+                    classname = entity.Classname;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(classname) ||
+                    !classname.StartsWith("trigger_", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                int triggerIdx = entity.Index;
+
+                // Skip if already touching this tick
+                if (_triggerTracker.IsTouching(pawn.Index, triggerIdx))
+                    continue;
+
+                _triggerTouchSynthesizer.EnsureTouchAfterManualTrigger(entity, pawn);
+
+                didSomething = true;
+            }
+
+            return didSomething;
         }
-        catch
+        finally
         {
             ArrayPool<uint>.Shared.Return(rentedBuffer);
-            return false;
         }
-
-        bool didSomething = false;
-
-        for (int i = 0; i < count; i++)
-        {
-            int idx = (int)rentedBuffer[i];
-
-            if (idx <= 0)
-                continue;
-
-            IBaseEntity? entity;
-
-            try
-            {
-                entity = _entityManager.FindEntityByIndex(idx);
-            }
-            catch
-            {
-                continue;
-            }
-
-            if (entity is null || !entity.IsValid())
-                continue;
-
-            string? classname;
-            try
-            {
-                classname = entity.Classname;
-            }
-            catch
-            {
-                continue;
-            }
-
-            if (string.IsNullOrEmpty(classname) ||
-                !classname.StartsWith("trigger_", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            int triggerIdx = entity.Index;
-
-            // Skip if already touching this tick
-            if (_triggerTracker.IsTouching(pawn.Index, triggerIdx))
-                continue;
-
-            _logger.LogDebug("TriggerJumpFix applied for trigger {TriggerIdx}", triggerIdx);
-            _triggerTouchSynthesizer.EnsureTouchAfterManualTrigger(entity, pawn);
-
-            didSomething = true;
-        }
-
-        ArrayPool<uint>.Shared.Return(rentedBuffer);
-        return didSomething;
     }
 }

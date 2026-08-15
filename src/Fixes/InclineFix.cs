@@ -1,7 +1,6 @@
 using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Models;
 using InsanityGaming.RngFix.Services;
-using Microsoft.Extensions.Logging;
 using Sharp.Shared.Enums;
 using Sharp.Shared.GameEntities;
 using Sharp.Shared.Types;
@@ -22,13 +21,11 @@ public sealed class InclineFix
 {
     private readonly RngFixConVars _conVars;
     private readonly IPhysicsSimulator _physics;
-    private readonly ILogger<InclineFix> _logger;
 
-    public InclineFix(RngFixConVars conVars, IPhysicsSimulator physics, ILogger<InclineFix> logger)
+    public InclineFix(RngFixConVars conVars, IPhysicsSimulator physics)
     {
         _conVars = conVars;
         _physics = physics;
-        _logger  = logger;
     }
 
     // ──────────────────────────────── Pre-tick ────────────────────────────────
@@ -75,7 +72,6 @@ public sealed class InclineFix
             if (clippedXYSqr > origXYSqr) return false; // Downhill fix is better — skip.
         }
 
-        _logger.LogDebug("InclineFix (uphill-neutral) applied at {CollisionPoint}", collisionPoint);
         PreventCollision(state, origin, collisionPoint, velocity, ref moveOrigin);
         return true;
     }
@@ -115,6 +111,9 @@ public sealed class InclineFix
 
         float dot = landingNormal.X * velocity.X + landingNormal.Y * velocity.Y;
 
+        // Clipped velocity is needed regardless of branch below — compute it once.
+        _physics.ClipVelocity(velocity, landingNormal, out var newVelocity);
+
         if (dot >= 0f)
         {
             // Going downhill.
@@ -123,15 +122,12 @@ public sealed class InclineFix
         else
         {
             // Going uphill — only fix in loss mode, or if downhill fix is actually more beneficial.
-            _physics.ClipVelocity(velocity, landingNormal, out var testClipped);
-            bool downhillBeneficial = testClipped.X * testClipped.X + testClipped.Y * testClipped.Y
+            bool downhillBeneficial = newVelocity.X * newVelocity.X + newVelocity.Y * newVelocity.Y
                                     > velocity.X * velocity.X + velocity.Y * velocity.Y;
             if (!((downhillBeneficial && _conVars.IsDownhillEnabled) || _conVars.UphillMode == PhysicsConstants.UphillLoss))
                 return false;
         }
 
-        _logger.LogDebug("InclineFix (post-tick) applied, normal.Z={NormalZ:F3}", landingNormal.Z);
-        _physics.ClipVelocity(velocity, landingNormal, out var newVelocity);
         newVelocity = new Vector(newVelocity.X, newVelocity.Y, 0f); // On ground — no Z velocity.
 
         if (_conVars.UseOldSlopeFixLogic)

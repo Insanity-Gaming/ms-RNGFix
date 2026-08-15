@@ -16,9 +16,14 @@ public sealed class TriggerTracker : ITriggerTracker
             return;
 
         if (touching)
-            triggers.Add(triggerEntityIndex);
+        {
+            if (!triggers.Contains(triggerEntityIndex))
+                triggers.Add(triggerEntityIndex);
+        }
         else
+        {
             triggers.Remove(triggerEntityIndex);
+        }
     }
 
     public bool IsTouching(int playerEntityIndex, int triggerEntityIndex)

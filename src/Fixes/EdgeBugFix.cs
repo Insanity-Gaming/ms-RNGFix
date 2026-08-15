@@ -1,6 +1,5 @@
 using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Models;
-using Microsoft.Extensions.Logging;
 using Sharp.Shared.Enums;
 using Sharp.Shared.GameEntities;
 using Sharp.Shared.Managers;
@@ -19,14 +18,12 @@ public sealed class EdgeBugFix
 {
     private readonly RngFixConVars _conVars;
     private readonly IPhysicsQueryManager _physicsQuery;
-    private readonly ILogger<EdgeBugFix> _logger;
 
 
-    public EdgeBugFix(RngFixConVars conVars, IPhysicsQueryManager physicsQuery, ILogger<EdgeBugFix> logger)
+    public EdgeBugFix(RngFixConVars conVars, IPhysicsQueryManager physicsQuery)
     {
         _conVars      = conVars;
         _physicsQuery = physicsQuery;
-        _logger       = logger;
     }
 
     /// <summary>
@@ -68,19 +65,13 @@ public sealed class EdgeBugFix
             new TraceShapeRay(new TraceShapeHull { Mins = mins, Maxs = maxs }),
             origin, collisionPoint,
             in fractionQuery);
-        if (fractionTrace.DidHit())
-            _logger.LogDebug("EdgeBug fraction hit — InteractsAs={A} InteractsWith={W} Group={G}",
-                fractionTrace.ShapeAttributes.InteractsAs,
-                fractionTrace.ShapeAttributes.InteractsWith,
-                fractionTrace.ShapeAttributes.CollisionGroup);
         float fractionLeft = 1f - fractionTrace.Fraction;
 
         Vector tickEnd;
 
-        if (Math.Abs(collisionNormal.Z - 1f) < 0.01)
+        if (Math.Abs(collisionNormal.Z - 1f) < 0.01f)
         {
             // Level ground: all that changes after collision is Z velocity becomes zero.
-            var velocityTick = new Vector(velocity.X * state.FrameTime, velocity.Y * state.FrameTime, velocity.Z * state.FrameTime);
             tickEnd = new Vector(
                 collisionPoint.X + velocity.X * state.FrameTime * fractionLeft,
                 collisionPoint.Y + velocity.Y * state.FrameTime * fractionLeft,
@@ -117,10 +108,6 @@ public sealed class EdgeBugFix
 
         if (groundTrace.DidHit())
         {
-            _logger.LogDebug("EdgeBug ground hit — InteractsAs={A} InteractsWith={W} Group={G}",
-                groundTrace.ShapeAttributes.InteractsAs,
-                groundTrace.ShapeAttributes.InteractsWith,
-                groundTrace.ShapeAttributes.CollisionGroup);
             // There's ground nearby — check if it's actually landable.
             var nrm2 = groundTrace.PlaneNormal;
             if (nrm2.Z >= PhysicsConstants.MinStandableZNrm) return false;           // Landable — no edge bug.
@@ -128,7 +115,6 @@ public sealed class EdgeBugFix
         }
 
         // The player will not land. Rewind origin to prevent the collision.
-        _logger.LogDebug("EdgeBugFix applied at {CollisionPoint}", collisionPoint);
         PreventCollision(state, origin, collisionPoint, velocity, ref moveOrigin);
         return true;
     }
@@ -197,12 +183,6 @@ public sealed class EdgeBugFix
             from, to,
             in query);
 
-        bool hit = trace.DidHit() && trace.PlaneNormal.Z >= PhysicsConstants.MinStandableZNrm;
-        if (hit)
-            _logger.LogDebug("EdgeBug hull quadrant hit — InteractsAs={A} InteractsWith={W} Group={G}",
-                trace.ShapeAttributes.InteractsAs,
-                trace.ShapeAttributes.InteractsWith,
-                trace.ShapeAttributes.CollisionGroup);
-        return hit;
+        return trace.DidHit() && trace.PlaneNormal.Z >= PhysicsConstants.MinStandableZNrm;
     }
 }

@@ -1,8 +1,6 @@
 using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Models;
 using InsanityGaming.RngFix.Services;
-using Microsoft.Extensions.Logging;
-using Sharp.Shared;
 using Sharp.Shared.Enums;
 using Sharp.Shared.GameEntities;
 using Sharp.Shared.Managers;
@@ -16,22 +14,18 @@ public sealed class StairsFix
     private readonly IPhysicsQueryManager _physicsQuery;
     private readonly IEntityManager _entityManager;
     private readonly TriggerNatives _triggerNatives;
-    private readonly ILogger<StairsFix> _logger;
 
 
     public StairsFix(
         RngFixConVars conVars,
         IPhysicsQueryManager physicsQuery,
         IEntityManager entityManager,
-        TriggerNatives triggerNatives,
-        ISharedSystem sharedSystem,
-        ILogger<StairsFix> logger)
+        TriggerNatives triggerNatives)
     {
         _conVars            = conVars;
         _physicsQuery       = physicsQuery;
         _entityManager      = entityManager;
         _triggerNatives     = triggerNatives;
-        _logger             = logger;
     }
 
     public bool TryApply(IPlayerPawn pawn, ModulePlayerState state)
@@ -73,8 +67,6 @@ public sealed class StairsFix
             in movementQuery);
 
         if (!downTrace.DidHit()) return false;
-        _logger.LogDebug("StairsFix down hit — InteractsAs={A} InteractsWith={W} Group={G}",
-            downTrace.ShapeAttributes.InteractsAs, downTrace.ShapeAttributes.InteractsWith, downTrace.ShapeAttributes.CollisionGroup);
         if (downTrace.PlaneNormal.Z < PhysicsConstants.MinStandableZNrm) return false;
 
         var groundBelowStep = downTrace.EndPosition;
@@ -127,11 +119,6 @@ public sealed class StairsFix
             groundBelowStep, stepTop,
             in movementQuery);
 
-        if (upTrace.DidHit())
-        {
-            _logger.LogDebug("StairsFix up hit — InteractsAs={A} InteractsWith={W} Group={G}",
-                upTrace.ShapeAttributes.InteractsAs, upTrace.ShapeAttributes.InteractsWith, upTrace.ShapeAttributes.CollisionGroup);
-        }
         var afterUp = upTrace.DidHit() ? upTrace.EndPosition : stepTop;
 
         // ── Step 4: Trace forward ──
@@ -143,11 +130,7 @@ public sealed class StairsFix
             in movementQuery);
 
         if (overTrace.DidHit())
-        {
-            _logger.LogDebug("StairsFix over hit — InteractsAs={A} InteractsWith={W} Group={G}",
-                overTrace.ShapeAttributes.InteractsAs, overTrace.ShapeAttributes.InteractsWith, overTrace.ShapeAttributes.CollisionGroup);
             return false;
-        }
 
         // ── Step 5: Trace down ──
         var dropEnd = new Vector(overEnd.X, overEnd.Y, overEnd.Z - stepSize);
@@ -158,13 +141,9 @@ public sealed class StairsFix
             in movementQuery);
 
         if (!finalDownTrace.DidHit()) return false;
-        _logger.LogDebug("StairsFix finalDown hit — InteractsAs={A} InteractsWith={W} Group={G}",
-            finalDownTrace.ShapeAttributes.InteractsAs, finalDownTrace.ShapeAttributes.InteractsWith, finalDownTrace.ShapeAttributes.CollisionGroup);
         if (finalDownTrace.PlaneNormal.Z < PhysicsConstants.MinStandableZNrm) return false;
 
         var stepTopLanding = finalDownTrace.EndPosition;
-
-        _logger.LogDebug("StairsFix applied at {StepTop}", stepTopLanding);
 
         pawn.Teleport(stepTopLanding, null, null);
         InclineFix.SetVelocity(pawn, state.PreCollisionVelocity, state);
@@ -190,9 +169,8 @@ public sealed class StairsFix
 
             return entity;
         }
-        catch (Exception ex)
+        catch
         {
-            _logger.LogDebug(ex, "Invalid entity index {Index}", index);
             return null;
         }
     }

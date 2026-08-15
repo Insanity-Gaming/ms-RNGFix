@@ -2,7 +2,6 @@ using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Fixes;
 using InsanityGaming.RngFix.Models;
 using InsanityGaming.RngFix.Services;
-using Microsoft.Extensions.Logging;
 using Sharp.Shared;
 using Sharp.Shared.Enums;
 using Sharp.Shared.GameEntities;
@@ -25,34 +24,34 @@ public sealed class PostThinkHandler : IRngModule
     private readonly ISharedSystem _sharedSystem;
     private readonly IPlayerStateService _playerState;
     private readonly IPhysicsQueryManager _physicsQuery;
+    private readonly IPhysicsSimulator _physics;
     private readonly RngFixConVars _conVars;
     private readonly TriggerJumpFix _triggerJumpFix;
     private readonly StairsFix _stairsFix;
     private readonly InclineFix _inclineFix;
     private readonly TelehopFix _telehopFix;
-    private readonly ILogger<PostThinkHandler> _logger;
 
 
     public PostThinkHandler(
         ISharedSystem sharedSystem,
         IPlayerStateService playerState,
         IPhysicsQueryManager physicsQuery,
+        IPhysicsSimulator physics,
         RngFixConVars conVars,
         TriggerJumpFix triggerJumpFix,
         StairsFix stairsFix,
         InclineFix inclineFix,
-        TelehopFix telehopFix,
-        ILogger<PostThinkHandler> logger)
+        TelehopFix telehopFix)
     {
         _sharedSystem      = sharedSystem;
         _playerState       = playerState;
         _physicsQuery      = physicsQuery;
+        _physics           = physics;
         _conVars           = conVars;
         _triggerJumpFix    = triggerJumpFix;
         _stairsFix         = stairsFix;
         _inclineFix        = inclineFix;
         _telehopFix        = telehopFix;
-        _logger            = logger;
     }
 
     public bool Init()
@@ -61,7 +60,10 @@ public sealed class PostThinkHandler : IRngModule
         return true;
     }
 
-    public void Shutdown() { }
+    public void Shutdown()
+    {
+        _sharedSystem.GetHookManager().PlayerPostThink.RemoveForward(OnPostThink);
+    }
 
     /// <summary>
     /// Called by the PlayerPostThink hook. Entry point for all post-tick logic.
@@ -72,7 +74,7 @@ public sealed class PostThinkHandler : IRngModule
         if (pawn is null) return;
         if (!pawn.IsAlive) return;
         if (pawn.ActualMoveType != MoveType.Walk) return;
-        if (IsInWater(pawn)) return;
+        if (_physics.IsInWater(pawn)) return;
 
         int entityIndex = pawn.Index;
         var state = _playerState.Get(entityIndex);
@@ -118,11 +120,6 @@ public sealed class PostThinkHandler : IRngModule
             }
             else
             {
-                _logger.LogDebug("PostThink ground hit — InteractsAs={A} InteractsWith={W} Group={G}",
-                    groundTrace.ShapeAttributes.InteractsAs,
-                    groundTrace.ShapeAttributes.InteractsWith,
-                    groundTrace.ShapeAttributes.CollisionGroup);
-
                 landingNormal = groundTrace.PlaneNormal;
                 landingPoint  = groundTrace.EndPosition;
                 landingFraction = groundTrace.Fraction;
@@ -160,6 +157,12 @@ public sealed class PostThinkHandler : IRngModule
         {
             _triggerJumpFix.TryApply(pawn, landingPoint, landingMins, landingMaxs);
 
+            // TryApply fires the real CBaseEntity::Touch on any missed trigger along the landing
+            // path (trigger_hurt, trigger_teleport, trigger_changelevel, ...), which can run
+            // arbitrary map I/O and may kill/remove the pawn. Re-validate before touching it again.
+            if (!pawn.IsValid() || !pawn.IsAlive)
+                return;
+
             // After trigger jump fix: a teleport may have lifted us off the ground.
             if (!pawn.Flags.HasFlag(EntityFlags.OnGround))
             {
@@ -188,8 +191,6 @@ public sealed class PostThinkHandler : IRngModule
     }
 
     // ──────────────────────────────── Private helpers ────────────────────────────────
-
-    private bool IsInWater(IPlayerPawn pawn) => pawn.GetNetVar<float>(PhysicsConstants.NetVarWaterLevel) > 1f;
 
     /// <summary>
     /// Tries the four hull quadrants (mirrors CGameMovement::TracePlayerBBoxForGround) to
@@ -260,11 +261,6 @@ public sealed class PostThinkHandler : IRngModule
 
         if (trace.DidHit() && trace.PlaneNormal.Z >= PhysicsConstants.MinStandableZNrm)
         {
-            _logger.LogDebug("PostThink quadrant hit — InteractsAs={A} InteractsWith={W} Group={G}",
-                trace.ShapeAttributes.InteractsAs,
-                trace.ShapeAttributes.InteractsWith,
-                trace.ShapeAttributes.CollisionGroup);
-
             normal = trace.PlaneNormal;
             point  = trace.EndPosition;
             fraction = trace.Fraction;

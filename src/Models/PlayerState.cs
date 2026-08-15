@@ -35,8 +35,9 @@ public sealed class PlayerState
     public int LastMapTeleportTick { get; set; }
     public bool MapTeleportedSequentialTicks { get; set; }
 
-    // Trigger touch tracking (get-only HashSet, never replaced)
-    public HashSet<int> TouchingTriggers { get; } = new();
+    // Trigger touch tracking (get-only list, never replaced). A player touches very few triggers
+    // at once, so a small dense list with a linear scan beats a HashSet's hashing overhead here.
+    public List<int> TouchingTriggers { get; } = new();
 
     // Count of trigger_teleport entities currently touching this player
     public int TouchingTeleportTriggerCount { get; set; }

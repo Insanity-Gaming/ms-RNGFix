@@ -51,4 +51,8 @@ public static class PhysicsConstants
     public const int UphillLoss = -1;
     public const int UphillDefault = 0;
     public const int UphillNeutral = 1;
+
+    // Upper bound on entity indices, used to size/bounds-check array-backed per-entity state
+    // (PlayerStateService). CS2's entity index space does not exceed this.
+    public const int MaxEntityIndex = 16384;
 }

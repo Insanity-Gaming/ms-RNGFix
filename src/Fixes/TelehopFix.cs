@@ -1,8 +1,6 @@
 using InsanityGaming.RngFix.Config;
 using InsanityGaming.RngFix.Models;
 using InsanityGaming.RngFix.Services;
-using Microsoft.Extensions.Logging;
-using Sharp.Shared;
 using Sharp.Shared.GameEntities;
 using Sharp.Shared.Managers;
 using Sharp.Shared.Types;
@@ -26,14 +24,12 @@ public sealed class TelehopFix
 {
     private readonly RngFixConVars _conVars;
     private readonly IPhysicsSimulator _physics;
-    private readonly ILogger<TelehopFix> _logger;
 
 
-    public TelehopFix(RngFixConVars conVars, IPhysicsSimulator physics, ISharedSystem sharedSystem, ILogger<TelehopFix> logger)
+    public TelehopFix(RngFixConVars conVars, IPhysicsSimulator physics)
     {
         _conVars        = conVars;
         _physics        = physics;
-        _logger         = logger;
     }
 
     /// <summary>
@@ -87,14 +83,6 @@ public sealed class TelehopFix
 
         bool isStuck = stuckTrace.DidHit();
 
-        if (isStuck)
-        {
-            _logger.LogDebug("TelehopFix stuck hit — InteractsAs={A} InteractsWith={W} Group={G}",
-                stuckTrace.ShapeAttributes.InteractsAs,
-                stuckTrace.ShapeAttributes.InteractsWith,
-                stuckTrace.ShapeAttributes.CollisionGroup);
-        }
-
         // Safety check: trace the restored velocity for one tick from the post-teleport origin.
         // If the path is immediately blocked (very low fraction), the player is likely at a reset
         // spawn pressed against solid geometry — skip restoration to avoid pushing them into it.
@@ -110,12 +98,8 @@ public sealed class TelehopFix
             in safetyQuery);
 
         if (safetyTrace.Fraction < 0.1f)
-        {
-            _logger.LogDebug("TelehopFix skipped — safety trace blocked (fraction={F:F3})", safetyTrace.Fraction);
             return false;
-        }
 
-        _logger.LogDebug("TelehopFix applied (stuck={IsStuck})", isStuck);
         InclineFix.SetVelocity(pawn, newVelocity, state, dontUseTeleport: isStuck);
         return true;
     }
