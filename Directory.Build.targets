@@ -19,6 +19,8 @@
 			<PluginFiles Include="$(TargetPath)" />
 			<PluginFiles Include="$(TargetDir)$(AssemblyName).deps.json" Condition="Exists('$(TargetDir)$(AssemblyName).deps.json')" />
 			<PluginFiles Include="$(TargetDir)$(AssemblyName).pdb" Condition="Exists('$(TargetDir)$(AssemblyName).pdb')" />
+			<!-- Runtime dependencies that ModSharp does not provide -->
+			<PluginFiles Include="@(RuntimeCopyLocalItems)" Condition="'%(RuntimeCopyLocalItems.NuGetPackageId)' == 'Iced'" />
 		</ItemGroup>
 
 		<Copy
