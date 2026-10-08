@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using InsanityGaming.RngFix.Infrastructure;
 using InsanityGaming.RngFix.MovementFix;
 using Microsoft.Extensions.Configuration;
@@ -5,6 +6,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Sharp.Shared;
 using Sharp.Shared.Objects;
+
+// The movement fix detours take and return bool across the native boundary ([UnmanagedCallersOnly]), which is only
+// blittable (as a 1-byte C++ bool) with runtime marshalling disabled, as in Source2Surf/Timer.
+[assembly: DisableRuntimeMarshalling]
 
 namespace InsanityGaming.RngFix;
 
