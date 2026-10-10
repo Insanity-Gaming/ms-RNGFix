@@ -11,6 +11,7 @@
 
     <ItemGroup>
         <PackageReference Include="ModSharp.Sharp.Shared" Version="*" PrivateAssets="all"/>
+        <PackageReference Include="Iced" Version="1.21.0"/>
     </ItemGroup>
 </Project>
 
