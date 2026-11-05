@@ -52,10 +52,25 @@ internal unsafe partial class MovementFixModule
 
     private static void CreateTriggerFilterVtable()
     {
-        _triggerFilterVtable = (CTraceFilterVirtualTableDescriptor*) NativeMemory.Alloc((nuint) sizeof(CTraceFilterVirtualTableDescriptor));
+        var destructor      = (nint) (delegate* unmanaged<nint, void>) &TriggerFilterDestructor;
+        var shouldHitEntity = (nint) (delegate* unmanaged<CTraceFilter*, nint, bool>) &TriggerFilterShouldHitEntity;
 
-        _triggerFilterVtable->Deconstructor   = &TriggerFilterDestructor;
-        _triggerFilterVtable->ShouldHitEntity = &TriggerFilterShouldHitEntity;
+        // The game's CTraceFilter layout. MSVC: destructor, ShouldHitEntity.
+        // Itanium (Linux): complete destructor, deleting destructor, ShouldHitEntity.
+        var slots = (nint*) NativeMemory.AllocZeroed((nuint) (3 * sizeof(nint)));
+        slots[0] = destructor;
+
+        if (OperatingSystem.IsWindows())
+        {
+            slots[1] = shouldHitEntity;
+        }
+        else
+        {
+            slots[1] = destructor;
+            slots[2] = shouldHitEntity;
+        }
+
+        _triggerFilterVtable = (CTraceFilterVirtualTableDescriptor*) slots;
     }
 
     private static void FreeTriggerFilterVtable()
